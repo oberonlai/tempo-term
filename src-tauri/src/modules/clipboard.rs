@@ -22,6 +22,22 @@ pub fn terminal_prepare_clipboard_image_attachment(path: String) -> Result<(), S
     prepare_clipboard_image_attachment(Path::new(&path))
 }
 
+#[tauri::command]
+pub fn terminal_save_dropped_image(
+    name: Option<String>,
+    mime: Option<String>,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("dropped image is empty".to_string());
+    }
+    let ext = image_extension(name.as_deref(), mime.as_deref(), &bytes)
+        .ok_or_else(|| "dropped file is not a supported image".to_string())?;
+    let path = unique_temp_image_path(ext)?;
+    fs::write(&path, bytes).map_err(|e| format!("failed to save dropped image: {e}"))?;
+    Ok(path_to_string(path))
+}
+
 #[cfg(target_os = "macos")]
 fn clipboard_image_paths() -> Result<Vec<String>, String> {
     let image_paths: Vec<String> = macos_clipboard_file_paths()?
@@ -209,6 +225,39 @@ fn is_image_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn image_extension(name: Option<&str>, mime: Option<&str>, bytes: &[u8]) -> Option<&'static str> {
+    if let Some(mime) = mime {
+        match mime.to_ascii_lowercase().as_str() {
+            "image/png" => return Some("png"),
+            "image/jpeg" | "image/jpg" => return Some("jpg"),
+            "image/gif" => return Some("gif"),
+            "image/webp" => return Some("webp"),
+            _ => {}
+        }
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Some("png");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("jpg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    let ext = Path::new(name?)
+        .extension()
+        .and_then(|e| e.to_str())?
+        .to_ascii_lowercase();
+    IMAGE_EXTENSIONS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == ext)
+        .map(|ext| if ext == "jpeg" { "jpg" } else { ext })
+}
+
 fn unique_temp_image_path(ext: &str) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join("tempoterm-clipboard-images");
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create image temp dir: {e}"))?;
@@ -238,7 +287,7 @@ fn applescript_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::is_image_path;
+    use super::{image_extension, is_image_path};
     use std::path::Path;
 
     #[test]
@@ -246,5 +295,12 @@ mod tests {
         assert!(is_image_path(Path::new("/tmp/a.PNG")));
         assert!(is_image_path(Path::new("/tmp/a.jpeg")));
         assert!(!is_image_path(Path::new("/tmp/a.txt")));
+    }
+
+    #[test]
+    fn detects_image_extension_from_drop_metadata() {
+        assert_eq!(image_extension(None, Some("image/png"), &[]), Some("png"));
+        assert_eq!(image_extension(Some("a.jpeg"), None, &[]), Some("jpg"));
+        assert_eq!(image_extension(None, None, b"\x89PNG\r\n"), Some("png"));
     }
 }

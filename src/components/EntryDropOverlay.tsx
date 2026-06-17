@@ -34,6 +34,12 @@ interface EntryDropOverlayProps {
   onDropEntry: (entry: DraggedEntry) => void;
 }
 
+export function dropOverlayClassName(ok: boolean): string {
+  return `absolute inset-0 z-30 border-2 border-dashed ${
+    ok ? "border-accent/60 bg-accent/[0.07]" : "border-danger/40 bg-danger/[0.04]"
+  }`;
+}
+
 /**
  * A drop target covering its positioned parent. Covering the parent (rather than
  * relying on bubbling) is what lets a drop land on a preview iframe. Green when
@@ -44,9 +50,7 @@ export function EntryDropOverlay({ accept, onDropEntry }: EntryDropOverlayProps)
   const ok = entry ? accept(entry) : false;
   return (
     <div
-      className={`absolute inset-0 z-30 border-2 border-dashed ${
-        ok ? "border-accent/60 bg-accent/[0.07]" : "border-danger/40 bg-danger/[0.04]"
-      }`}
+      className={dropOverlayClassName(ok)}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = ok ? "copy" : "none";

@@ -1,17 +1,23 @@
-import { useEffect, useRef } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useEffect, useRef, useState } from "react";
 import { createTerminal, type TerminalHandle } from "./lib/createTerminal";
 import { openPty, type PtySession } from "./lib/pty-bridge";
 import { registerTerminal, unregisterTerminal } from "./lib/terminalBus";
+import { imageFilesFromDrop, imagePathsFromDrop } from "./lib/terminalDrop";
 import {
   formatImagePathsForTerminal,
   isImageAttachmentCli,
+  isImagePath,
   prepareClipboardImageAttachment,
+  saveDroppedImage,
   terminalClipboardImagePaths,
   terminalClipboardText,
 } from "./lib/terminalClipboard";
 import { findFilePaths, resolveFilePath } from "./lib/fileLinks";
 import { terminalKeySequence } from "./lib/terminalKeymap";
+import { dropOverlayClassName } from "@/components/EntryDropOverlay";
 import { fsHomeDir, fsReadFile } from "@/modules/explorer/lib/fsBridge";
+import { getDraggedEntry } from "@/modules/explorer/lib/dragEntry";
 
 const IS_MAC =
   typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
@@ -73,6 +79,9 @@ export function TerminalView({
   const fontSize = useFontStore((s) => s.fontSize);
   const themeId = useSettingsStore((s) => s.themeId);
   const terminalPadding = useSettingsStore((s) => s.terminalPadding);
+  const [externalImageDragging, setExternalImageDragging] = useState(false);
+  const dragDepthRef = useRef(0);
+  const nativeDragPathsRef = useRef<string[]>([]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -459,16 +468,180 @@ export function TerminalView({
     };
   }, [cwdTracking]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    const pointInContainer = (x: number, y: number): boolean => {
+      let lx = x;
+      let ly = y;
+      if (x > window.innerWidth || y > window.innerHeight) {
+        const dpr = window.devicePixelRatio || 1;
+        lx = x / dpr;
+        ly = y / dpr;
+      }
+      const rect = container.getBoundingClientRect();
+      return lx >= rect.left && lx <= rect.right && ly >= rect.top && ly <= rect.bottom;
+    };
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (disposed) {
+          return;
+        }
+        const payload = event.payload;
+        if (payload.type === "leave") {
+          nativeDragPathsRef.current = [];
+          setExternalImageDragging(false);
+          return;
+        }
+        if (!pointInContainer(payload.position.x, payload.position.y)) {
+          setExternalImageDragging(false);
+          return;
+        }
+        if (payload.type === "enter") {
+          const paths = payload.paths.filter(isImagePath);
+          nativeDragPathsRef.current = paths;
+          setExternalImageDragging(paths.length > 0);
+          return;
+        }
+        if (payload.type === "over") {
+          setExternalImageDragging(nativeDragPathsRef.current.length > 0);
+          return;
+        }
+        const paths = payload.paths.filter(isImagePath);
+        nativeDragPathsRef.current = [];
+        setExternalImageDragging(false);
+        if (paths.length > 0) {
+          void handleImagePathDrop(paths);
+        }
+      })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      nativeDragPathsRef.current = [];
+      setExternalImageDragging(false);
+      unlisten?.();
+    };
+  }, []);
+
   // Match the padding gutter to the terminal's own background so the inset
   // reads as breathing room rather than a different-coloured frame.
+  function isExternalImageDrag(data: DataTransfer): boolean {
+    if (getDraggedEntry()) {
+      return false;
+    }
+    const hasImageItem = Array.from(data.items).some(
+      (item) => item.kind === "file" && item.type.startsWith("image/"),
+    );
+    return (
+      hasImageItem ||
+      Array.from(data.files).some((file) => file.type.startsWith("image/")) ||
+      imagePathsFromDrop(data).length > 0
+    );
+  }
+
+  async function handleImagePathDrop(paths: string[], files: File[] = []) {
+    const session = sessionRef.current;
+    const handle = handleRef.current;
+    if (!session || !handle) {
+      return;
+    }
+    const resolvedPaths =
+      paths.length > 0
+        ? paths
+        : await Promise.all(files.map((file) => saveDroppedImage(file).catch(() => "")));
+    const imagePaths = resolvedPaths.filter(Boolean);
+    if (imagePaths.length === 0) {
+      return;
+    }
+    const command = await session.foregroundCommand().catch(() => null);
+    if (isImageAttachmentCli(command)) {
+      await prepareClipboardImageAttachment(imagePaths[0]).catch(() => {});
+      await session.write("\x16");
+      return;
+    }
+    handle.term.paste(formatImagePathsForTerminal(imagePaths));
+  }
+
   return (
     <div
       ref={containerRef}
-      className="h-full w-full"
+      className="relative h-full w-full"
       style={{
         padding: terminalPadding,
         backgroundColor: getTheme(themeId).terminal.background,
       }}
-    />
+      onDragEnter={(event) => {
+        if (nativeDragPathsRef.current.length > 0) {
+          return;
+        }
+        if (!isExternalImageDrag(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        dragDepthRef.current += 1;
+        setExternalImageDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (nativeDragPathsRef.current.length > 0) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          return;
+        }
+        if (!isExternalImageDrag(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setExternalImageDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (nativeDragPathsRef.current.length > 0) {
+          return;
+        }
+        if (!isExternalImageDrag(event.dataTransfer)) {
+          return;
+        }
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) {
+          setExternalImageDragging(false);
+        }
+      }}
+      onDrop={(event) => {
+        if (nativeDragPathsRef.current.length > 0) {
+          event.preventDefault();
+          const paths = nativeDragPathsRef.current;
+          nativeDragPathsRef.current = [];
+          dragDepthRef.current = 0;
+          setExternalImageDragging(false);
+          void handleImagePathDrop(paths);
+          return;
+        }
+        if (!isExternalImageDrag(event.dataTransfer)) {
+          return;
+        }
+        event.preventDefault();
+        dragDepthRef.current = 0;
+        setExternalImageDragging(false);
+        const paths = imagePathsFromDrop(event.dataTransfer);
+        const files = imageFilesFromDrop(event.dataTransfer);
+        void handleImagePathDrop(paths, files);
+      }}
+    >
+      {externalImageDragging && <div className={dropOverlayClassName(true)} />}
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatImagePathsForTerminal,
   isImageAttachmentCli,
+  isImagePath,
   shellQuotePath,
 } from "./terminalClipboard";
 
@@ -19,6 +20,11 @@ describe("terminal clipboard helpers", () => {
       "/tmp/a.png '/tmp/CleanShot 1.jpg' ",
     );
     expect(formatImagePathsForTerminal([])).toBe("");
+  });
+
+  it("detects supported image paths", () => {
+    expect(isImagePath("/tmp/a.PNG")).toBe(true);
+    expect(isImagePath("/tmp/a.txt")).toBe(false);
   });
 
   it("shell-quotes paths only when needed", () => {

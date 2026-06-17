@@ -8,7 +8,7 @@ use modules::fs::{
 use modules::ai::ai_chat;
 use modules::clipboard::{
     terminal_clipboard_image_paths, terminal_clipboard_text,
-    terminal_prepare_clipboard_image_attachment,
+    terminal_prepare_clipboard_image_attachment, terminal_save_dropped_image,
 };
 use modules::git::{
     git_branch_checkout, git_branch_create_at, git_branch_delete, git_branches, git_cherry_pick,
@@ -41,6 +41,7 @@ pub fn run() {
             terminal_clipboard_image_paths,
             terminal_clipboard_text,
             terminal_prepare_clipboard_image_attachment,
+            terminal_save_dropped_image,
             fonts_report,
             fs_home_dir,
             fs_read_dir,
