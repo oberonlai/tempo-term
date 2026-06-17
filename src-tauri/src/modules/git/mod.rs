@@ -57,12 +57,14 @@ pub struct GraphLog {
     pub has_more: bool,
 }
 
-/// A local branch entry for the branch list.
+/// 分支清單的一筆，本地或遠端。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BranchInfo {
     pub name: String,
     #[serde(rename = "isCurrent")]
     pub is_current: bool,
+    #[serde(rename = "isRemote")]
+    pub is_remote: bool,
 }
 
 /// 線圖的顯示選項，來自前端工具列。branch 空字串或 None 代表 Show All。
@@ -470,7 +472,7 @@ pub fn graph_log(
     Ok(GraphLog { commits, has_more })
 }
 
-/// List local branches, marking the current one.
+/// 列出本地與遠端分支，標出目前所在分支與是否為遠端。
 pub fn branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {
     let repo = Repository::open(repo_path).map_err(|e| e.message().to_string())?;
     let head_name = repo
@@ -479,17 +481,41 @@ pub fn branches(repo_path: &str) -> Result<Vec<BranchInfo>, String> {
         .and_then(|h| h.shorthand().map(|s| s.to_string()));
 
     let mut out = Vec::new();
-    let iter = repo
+
+    let local = repo
         .branches(Some(git2::BranchType::Local))
         .map_err(|e| e.message().to_string())?;
-    for entry in iter {
+    for entry in local {
         let (branch, _) = entry.map_err(|e| e.message().to_string())?;
         if let Some(name) = branch.name().map_err(|e| e.message().to_string())? {
             let name = name.to_string();
             let is_current = Some(&name) == head_name.as_ref();
-            out.push(BranchInfo { name, is_current });
+            out.push(BranchInfo {
+                name,
+                is_current,
+                is_remote: false,
+            });
         }
     }
+
+    let remote = repo
+        .branches(Some(git2::BranchType::Remote))
+        .map_err(|e| e.message().to_string())?;
+    for entry in remote {
+        let (branch, _) = entry.map_err(|e| e.message().to_string())?;
+        if let Some(name) = branch.name().map_err(|e| e.message().to_string())? {
+            // 跳過 origin/HEAD 這種 symbolic ref，它只是指向預設分支。
+            if name.ends_with("/HEAD") {
+                continue;
+            }
+            out.push(BranchInfo {
+                name: name.to_string(),
+                is_current: false,
+                is_remote: true,
+            });
+        }
+    }
+
     Ok(out)
 }
 
@@ -787,7 +813,7 @@ mod tests {
         let branches = branches(&path).unwrap();
         assert_eq!(
             branches,
-            vec![BranchInfo { name: "main".into(), is_current: true }]
+            vec![BranchInfo { name: "main".into(), is_current: true, is_remote: false }]
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -807,7 +833,7 @@ mod tests {
 
         // Create branch at the commit and switch to it.
         branch_create_at(&path, "feature", &head).unwrap();
-        assert!(branches(&path).unwrap().iter().any(|b| b.name == "feature" && b.is_current));
+        assert!(branches(&path).unwrap().iter().any(|b| b.name == "feature" && b.is_current && !b.is_remote));
 
         // Tag the commit, then it should decorate the graph node.
         tag_create(&path, "v1", &head, Some("release")).unwrap();
