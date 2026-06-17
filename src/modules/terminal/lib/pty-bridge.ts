@@ -6,6 +6,7 @@ export interface PtySession {
   resize: (cols: number, rows: number) => Promise<void>;
   close: () => Promise<void>;
   cwd: () => Promise<string | null>;
+  foregroundCommand: () => Promise<string | null>;
 }
 
 export interface OpenPtyOptions {
@@ -69,5 +70,6 @@ export async function openPty(opts: OpenPtyOptions): Promise<PtySession> {
     resize: (cols, rows) => invoke("pty_resize", { id, cols, rows }),
     close: () => invoke("pty_close", { id }),
     cwd: () => invoke<string | null>("pty_cwd", { id }),
+    foregroundCommand: () => invoke<string | null>("pty_foreground_command", { id }),
   };
 }

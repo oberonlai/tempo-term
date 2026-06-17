@@ -2,6 +2,13 @@ import { useEffect, useRef } from "react";
 import { createTerminal, type TerminalHandle } from "./lib/createTerminal";
 import { openPty, type PtySession } from "./lib/pty-bridge";
 import { registerTerminal, unregisterTerminal } from "./lib/terminalBus";
+import {
+  formatImagePathsForTerminal,
+  isImageAttachmentCli,
+  prepareClipboardImageAttachment,
+  terminalClipboardImagePaths,
+  terminalClipboardText,
+} from "./lib/terminalClipboard";
 import { findFilePaths, resolveFilePath } from "./lib/fileLinks";
 import { terminalKeySequence } from "./lib/terminalKeymap";
 import { fsHomeDir, fsReadFile } from "@/modules/explorer/lib/fsBridge";
@@ -50,6 +57,8 @@ export function TerminalView({
 }: TerminalViewProps) {
   const leafIdRef = useRef(leafId);
   leafIdRef.current = leafId;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,6 +79,7 @@ export function TerminalView({
     if (!container) {
       return;
     }
+    const containerEl = container;
 
     const initial = useFontStore.getState();
     const handle = createTerminal({
@@ -80,6 +90,83 @@ export function TerminalView({
     handleRef.current = handle;
     const { term, fit } = handle;
     term.open(container);
+
+    async function handleTerminalPaste(kind: "ctrl" | "cmd") {
+      const session = sessionRef.current;
+      if (!session) {
+        return;
+      }
+      const [command, paths] = await Promise.all([
+        session.foregroundCommand().catch(() => null),
+        terminalClipboardImagePaths().catch(() => []),
+      ]);
+      if (paths.length > 0) {
+        if (isImageAttachmentCli(command)) {
+          await prepareClipboardImageAttachment(paths[0]).catch(() => {});
+          await session.write("\x16");
+        } else {
+          term.paste(formatImagePathsForTerminal(paths));
+        }
+        return;
+      }
+      if (kind === "cmd") {
+        const text = await terminalClipboardText().catch(() => "");
+        if (text) {
+          term.paste(text);
+        }
+        return;
+      }
+      await session.write("\x16");
+    }
+
+    function isTerminalPasteShortcut(event: KeyboardEvent): "ctrl" | "cmd" | null {
+      const isV = event.code === "KeyV" || event.key.toLowerCase() === "v";
+      if (!isV || event.altKey || event.shiftKey) {
+        return null;
+      }
+      if (IS_MAC && event.ctrlKey && !event.metaKey) {
+        return "ctrl";
+      }
+      if (IS_MAC && event.metaKey && !event.ctrlKey) {
+        return "cmd";
+      }
+      return null;
+    }
+
+    function interceptTerminalPaste(event: KeyboardEvent): boolean {
+      if (!activeRef.current || event.type !== "keydown") {
+        return false;
+      }
+      const target = event.target;
+      if (target instanceof Node && !containerEl.contains(target)) {
+        return false;
+      }
+      const kind = isTerminalPasteShortcut(event);
+      if (!kind) {
+        return false;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      void handleTerminalPaste(kind);
+      return true;
+    }
+
+    const onKeyDownCapture = (event: KeyboardEvent) => {
+      interceptTerminalPaste(event);
+    };
+    document.addEventListener("keydown", onKeyDownCapture, true);
+
+    const onPasteCapture = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (!activeRef.current || (target instanceof Node && !containerEl.contains(target))) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    document.addEventListener("paste", onPasteCapture, true);
 
     // Drop keydown events that belong to an active IME composition so the
     // composed text is only delivered once, through xterm's compositionend
@@ -103,6 +190,14 @@ export function TerminalView({
           void sessionRef.current?.write(seq);
           return false;
         }
+        if (IS_MAC && event.ctrlKey && !event.metaKey && !event.altKey) {
+          const isV = event.code === "KeyV" || event.key.toLowerCase() === "v";
+          if (isV) {
+            event.preventDefault();
+            void handleTerminalPaste("ctrl");
+            return false;
+          }
+        }
         // Clipboard on macOS: Cmd+C copies the selection, Cmd+V pastes.
         if (IS_MAC && event.metaKey && !event.ctrlKey && !event.altKey) {
           const k = event.key.toLowerCase();
@@ -110,17 +205,9 @@ export function TerminalView({
             void navigator.clipboard.writeText(term.getSelection());
             return false;
           }
-          if (k === "v") {
-            navigator.clipboard
-              .readText()
-              .then((text) => {
-                if (text) {
-                  term.paste(text);
-                }
-              })
-              .catch(() => {
-                // clipboard read denied — let xterm's own paste handle it
-              });
+          if (event.code === "KeyV" || k === "v") {
+            event.preventDefault();
+            void handleTerminalPaste("cmd");
             return false;
           }
         }
@@ -260,6 +347,8 @@ export function TerminalView({
     return () => {
       disposed = true;
       observer.disconnect();
+      document.removeEventListener("keydown", onKeyDownCapture, true);
+      document.removeEventListener("paste", onPasteCapture, true);
       if (leafIdRef.current) {
         unregisterTerminal(leafIdRef.current);
       }

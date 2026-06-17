@@ -180,6 +180,12 @@ pub fn shell_name(state: &PtyState, id: u32) -> Result<String, String> {
     Ok(state.get(id)?.shell_name.clone())
 }
 
+pub fn foreground_command(state: &PtyState, id: u32) -> Result<Option<String>, String> {
+    let session = state.get(id)?;
+    let pid = session.master.lock().unwrap().process_group_leader();
+    Ok(pid.and_then(read_process_command))
+}
+
 /// The working directory of the terminal's foreground process (the shell when
 /// sitting at a prompt). Lets the file explorer follow `cd`.
 pub fn cwd(state: &PtyState, id: u32) -> Result<Option<String>, String> {
@@ -208,6 +214,21 @@ fn read_process_cwd(pid: i32) -> Option<String> {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn read_process_cwd(_pid: i32) -> Option<String> {
+    None
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn read_process_command(pid: i32) -> Option<String> {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!command.is_empty()).then_some(command)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn read_process_command(_pid: i32) -> Option<String> {
     None
 }
 

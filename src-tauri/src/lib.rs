@@ -6,6 +6,10 @@ use modules::fs::{
     fs_read_file, fs_reveal, fs_write_file,
 };
 use modules::ai::ai_chat;
+use modules::clipboard::{
+    terminal_clipboard_image_paths, terminal_clipboard_text,
+    terminal_prepare_clipboard_image_attachment,
+};
 use modules::git::{
     git_branch_checkout, git_branch_create_at, git_branch_delete, git_branches, git_cherry_pick,
     git_commit, git_diff, git_graph_log, git_log, git_merge, git_push, git_reset, git_resolve_repo,
@@ -13,7 +17,8 @@ use modules::git::{
 };
 use modules::secrets::{secrets_delete_key, secrets_has_key, secrets_set_key};
 use modules::pty::{
-    pty_close, pty_close_all, pty_cwd, pty_open, pty_resize, pty_shell_name, pty_write, PtyState,
+    pty_close, pty_close_all, pty_cwd, pty_foreground_command, pty_open, pty_resize,
+    pty_shell_name, pty_write, PtyState,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,9 +34,13 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_shell_name,
+            pty_foreground_command,
             pty_cwd,
             pty_close,
             pty_close_all,
+            terminal_clipboard_image_paths,
+            terminal_clipboard_text,
+            terminal_prepare_clipboard_image_attachment,
             fonts_report,
             fs_home_dir,
             fs_read_dir,
