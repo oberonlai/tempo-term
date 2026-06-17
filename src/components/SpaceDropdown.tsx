@@ -9,15 +9,21 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTabsStore, type Tab } from "@/stores/tabsStore";
+import { computeLayout } from "@/modules/terminal/lib/terminalLayout";
 
 function tabSubtitle(tab: Tab): string {
-  switch (tab.kind) {
+  const active = computeLayout(tab.paneTree).find((p) => p.id === tab.activeLeafId);
+  const content = active?.content;
+  if (!content) {
+    return "";
+  }
+  switch (content.kind) {
     case "terminal":
       return tab.cwd ?? "";
     case "editor":
-      return tab.path;
+      return content.path;
     case "preview":
-      return tab.url;
+      return content.url;
     default:
       return "";
   }

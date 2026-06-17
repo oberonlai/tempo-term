@@ -4,6 +4,7 @@ import { uid } from "@/lib/id";
 import {
   firstLeafId,
   leaf,
+  paneOf,
   removeLeaf,
   setLeafPane,
   setSizesById,
@@ -14,50 +15,34 @@ import {
 } from "@/modules/terminal/lib/terminalLayout";
 
 /**
- * Terax-style typed tabs grouped into spaces. A space is a context (like a
- * window) that holds its own set of tabs. Each tab is an independent panel of a
- * chosen kind: terminal tabs own a recursive split paneTree; editor tabs hold
- * one file. Tabs stay mounted when inactive (hidden) so terminals keep running.
+ * Tabs grouped into spaces. A space is a context (like a window) that holds its
+ * own set of tabs. Every tab owns a recursive split paneTree, so any tab can be
+ * split into panes of mixed content (terminal/editor/note/preview/git-graph),
+ * just like a terminal tab. Tabs stay mounted when inactive (hidden) so
+ * terminals keep running.
  */
 export interface Space {
   id: string;
   name: string;
 }
 
-interface TabBase {
+export type TabKind = "terminal" | "editor" | "note" | "preview" | "git-graph";
+
+/**
+ * A single tab. `kind` is only the tab's creation type, used for the tab-bar
+ * icon and open-dedup; it does not have to match a split's mixed contents (a
+ * terminal tab split with an editor still shows the terminal icon).
+ */
+export interface Tab {
   id: string;
   spaceId: string;
   title: string;
-}
-
-export interface TerminalTab extends TabBase {
-  kind: "terminal";
+  kind: TabKind;
   paneTree: LayoutNode;
   activeLeafId: string;
-  /** Directory new panes in this tab start in (the work-tree root at creation). */
+  /** Starting directory for new terminal panes created inside this tab. */
   cwd?: string;
 }
-
-export interface EditorTab extends TabBase {
-  kind: "editor";
-  path: string;
-}
-
-export interface NoteTab extends TabBase {
-  kind: "note";
-  noteId: string;
-}
-
-export interface PreviewTab extends TabBase {
-  kind: "preview";
-  url: string;
-}
-
-export interface GitGraphTab extends TabBase {
-  kind: "git-graph";
-}
-
-export type Tab = TerminalTab | EditorTab | NoteTab | PreviewTab | GitGraphTab;
 
 interface TabsState {
   spaces: Space[];
@@ -89,10 +74,6 @@ interface TabsState {
   ) => void;
   /** Replace a pane's content in place (used when dropping a file onto it). */
   setPaneContent: (tabId: string, leafId: string, content: PaneContent) => void;
-  /** Point an editor tab at a different file (dropping a file onto the tab). */
-  setEditorTabPath: (tabId: string, path: string) => void;
-  /** Point a preview tab at a different url (dropping a file onto the tab). */
-  setPreviewTabUrl: (tabId: string, url: string) => void;
   closePane: (tabId: string, leafId: string) => void;
 }
 
@@ -109,7 +90,94 @@ function neighbourId(tabs: Tab[], index: number): string | null {
   return tabs[index - 1]?.id ?? tabs[index]?.id ?? null;
 }
 
+/** True when a tab is a single, unsplit leaf showing exactly `content`. */
+function singleLeafContentEquals(tab: Tab, content: PaneContent): boolean {
+  if (tab.paneTree.kind !== "leaf") {
+    return false;
+  }
+  const pane = paneOf(tab.paneTree);
+  if (pane.kind !== content.kind) {
+    return false;
+  }
+  if (pane.kind === "editor" && content.kind === "editor") {
+    return pane.path === content.path;
+  }
+  if (pane.kind === "note" && content.kind === "note") {
+    return pane.noteId === content.noteId;
+  }
+  if (pane.kind === "preview" && content.kind === "preview") {
+    return pane.url === content.url;
+  }
+  return true;
+}
+
 export const TABS_STORAGE_KEY = "tempoterm-tabs";
+
+/** Shape of a tab as persisted before the unified paneTree model (v0). */
+interface PersistedV0Tab {
+  id: string;
+  spaceId: string;
+  title: string;
+  kind: TabKind;
+  path?: string;
+  noteId?: string;
+  url?: string;
+  paneTree?: LayoutNode;
+  activeLeafId?: string;
+  cwd?: string;
+}
+
+/** Convert pre-paneTree (v0) persisted tabs into the unified Tab shape. */
+export function migratePersistedTabs(persisted: unknown, _version: number): unknown {
+  if (!persisted || typeof persisted !== "object") {
+    return persisted;
+  }
+  const state = persisted as { tabs?: PersistedV0Tab[] };
+  if (!Array.isArray(state.tabs)) {
+    return persisted;
+  }
+  const tabs: Tab[] = state.tabs.map((t) => {
+    if (t.kind === "terminal" && t.paneTree && t.activeLeafId) {
+      return {
+        id: t.id,
+        spaceId: t.spaceId,
+        title: t.title,
+        kind: "terminal",
+        paneTree: t.paneTree,
+        activeLeafId: t.activeLeafId,
+        cwd: t.cwd,
+      };
+    }
+    const paneId = nextPaneId();
+    let content: PaneContent;
+    switch (t.kind) {
+      case "editor":
+        content = { kind: "editor", path: t.path ?? "" };
+        break;
+      case "note":
+        content = { kind: "note", noteId: t.noteId ?? "" };
+        break;
+      case "preview":
+        content = { kind: "preview", url: t.url ?? "" };
+        break;
+      case "git-graph":
+        content = { kind: "git-graph" };
+        break;
+      default:
+        content = { kind: "terminal" };
+    }
+    return {
+      id: t.id,
+      spaceId: t.spaceId,
+      title: t.title,
+      kind: t.kind,
+      paneTree: leaf(paneId, content),
+      activeLeafId: paneId,
+      cwd: t.cwd,
+    };
+  });
+  return { ...state, tabs };
+}
 
 export const useTabsStore = create<TabsState>()(
   persist(
@@ -168,12 +236,12 @@ export const useTabsStore = create<TabsState>()(
     const id = nextTabId();
     const paneId = nextPaneId();
     const count = get().tabs.filter((t) => t.kind === "terminal").length + 1;
-    const tab: TerminalTab = {
+    const tab: Tab = {
       id,
       spaceId,
       kind: "terminal",
       title: cwd ? basename(cwd) : `Terminal ${count}`,
-      paneTree: leaf(paneId),
+      paneTree: leaf(paneId, { kind: "terminal" }),
       activeLeafId: paneId,
       cwd,
     };
@@ -184,14 +252,25 @@ export const useTabsStore = create<TabsState>()(
   openEditorTab: (path) => {
     const spaceId = get().ensureSpace();
     const existing = get().tabs.find(
-      (t) => t.kind === "editor" && t.path === path && t.spaceId === spaceId,
+      (t) =>
+        t.kind === "editor" &&
+        t.spaceId === spaceId &&
+        singleLeafContentEquals(t, { kind: "editor", path }),
     );
     if (existing) {
       set({ activeId: existing.id });
       return existing.id;
     }
     const id = nextTabId();
-    const tab: EditorTab = { id, spaceId, kind: "editor", title: basename(path), path };
+    const paneId = nextPaneId();
+    const tab: Tab = {
+      id,
+      spaceId,
+      kind: "editor",
+      title: basename(path),
+      paneTree: leaf(paneId, { kind: "editor", path }),
+      activeLeafId: paneId,
+    };
     set((state) => ({ tabs: [...state.tabs, tab], activeId: id }));
     return id;
   },
@@ -199,14 +278,25 @@ export const useTabsStore = create<TabsState>()(
   openNoteTab: (noteId, title) => {
     const spaceId = get().ensureSpace();
     const existing = get().tabs.find(
-      (t) => t.kind === "note" && t.noteId === noteId && t.spaceId === spaceId,
+      (t) =>
+        t.kind === "note" &&
+        t.spaceId === spaceId &&
+        singleLeafContentEquals(t, { kind: "note", noteId }),
     );
     if (existing) {
       set({ activeId: existing.id });
       return existing.id;
     }
     const id = nextTabId();
-    const tab: NoteTab = { id, spaceId, kind: "note", title: title || "Untitled", noteId };
+    const paneId = nextPaneId();
+    const tab: Tab = {
+      id,
+      spaceId,
+      kind: "note",
+      title: title || "Untitled",
+      paneTree: leaf(paneId, { kind: "note", noteId }),
+      activeLeafId: paneId,
+    };
     set((state) => ({ tabs: [...state.tabs, tab], activeId: id }));
     return id;
   },
@@ -214,13 +304,21 @@ export const useTabsStore = create<TabsState>()(
   openPreviewTab: (url) => {
     const spaceId = get().ensureSpace();
     const id = nextTabId();
+    const paneId = nextPaneId();
     let host = url;
     try {
       host = new URL(url).host || url;
     } catch {
       host = url;
     }
-    const tab: PreviewTab = { id, spaceId, kind: "preview", title: host, url };
+    const tab: Tab = {
+      id,
+      spaceId,
+      kind: "preview",
+      title: host,
+      paneTree: leaf(paneId, { kind: "preview", url }),
+      activeLeafId: paneId,
+    };
     set((state) => ({ tabs: [...state.tabs, tab], activeId: id }));
     return id;
   },
@@ -228,14 +326,25 @@ export const useTabsStore = create<TabsState>()(
   openGitGraphTab: () => {
     const spaceId = get().ensureSpace();
     const existing = get().tabs.find(
-      (t) => t.kind === "git-graph" && t.spaceId === spaceId,
+      (t) =>
+        t.kind === "git-graph" &&
+        t.spaceId === spaceId &&
+        singleLeafContentEquals(t, { kind: "git-graph" }),
     );
     if (existing) {
       set({ activeId: existing.id });
       return existing.id;
     }
     const id = nextTabId();
-    const tab: GitGraphTab = { id, spaceId, kind: "git-graph", title: "Git Graph" };
+    const paneId = nextPaneId();
+    const tab: Tab = {
+      id,
+      spaceId,
+      kind: "git-graph",
+      title: "Git Graph",
+      paneTree: leaf(paneId, { kind: "git-graph" }),
+      activeLeafId: paneId,
+    };
     set((state) => ({ tabs: [...state.tabs, tab], activeId: id }));
     return id;
   },
@@ -271,7 +380,7 @@ export const useTabsStore = create<TabsState>()(
   splitActivePane: (direction) =>
     set((state) => ({
       tabs: state.tabs.map((tab) => {
-        if (tab.id !== state.activeId || tab.kind !== "terminal") {
+        if (tab.id !== state.activeId) {
           return tab;
         }
         const newId = nextPaneId();
@@ -286,14 +395,14 @@ export const useTabsStore = create<TabsState>()(
   setActiveLeaf: (tabId, leafId) =>
     set((state) => ({
       tabs: state.tabs.map((tab) =>
-        tab.id === tabId && tab.kind === "terminal" ? { ...tab, activeLeafId: leafId } : tab,
+        tab.id === tabId ? { ...tab, activeLeafId: leafId } : tab,
       ),
     })),
 
   resizePane: (tabId, splitId, sizes) =>
     set((state) => ({
       tabs: state.tabs.map((tab) =>
-        tab.id === tabId && tab.kind === "terminal"
+        tab.id === tabId
           ? { ...tab, paneTree: setSizesById(tab.paneTree, splitId, sizes) }
           : tab,
       ),
@@ -302,7 +411,7 @@ export const useTabsStore = create<TabsState>()(
   splitPaneWith: (tabId, fromLeafId, content, direction) =>
     set((state) => ({
       tabs: state.tabs.map((tab) => {
-        if (tab.id !== tabId || tab.kind !== "terminal") {
+        if (tab.id !== tabId) {
           return tab;
         }
         const newId = nextPaneId();
@@ -317,32 +426,16 @@ export const useTabsStore = create<TabsState>()(
   setPaneContent: (tabId, leafId, content) =>
     set((state) => ({
       tabs: state.tabs.map((tab) =>
-        tab.id === tabId && tab.kind === "terminal"
+        tab.id === tabId
           ? { ...tab, paneTree: setLeafPane(tab.paneTree, leafId, content) }
           : tab,
-      ),
-    })),
-
-  setEditorTabPath: (tabId, path) =>
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.id === tabId && tab.kind === "editor"
-          ? { ...tab, path, title: basename(path) }
-          : tab,
-      ),
-    })),
-
-  setPreviewTabUrl: (tabId, url) =>
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.id === tabId && tab.kind === "preview" ? { ...tab, url } : tab,
       ),
     })),
 
   closePane: (tabId, leafId) =>
     set((state) => {
       const tab = state.tabs.find((t) => t.id === tabId);
-      if (!tab || tab.kind !== "terminal") {
+      if (!tab) {
         return state;
       }
       const paneTree = removeLeaf(tab.paneTree, leafId);
@@ -361,13 +454,15 @@ export const useTabsStore = create<TabsState>()(
         tab.activeLeafId === leafId ? (firstLeafId(paneTree) ?? tab.activeLeafId) : tab.activeLeafId;
       return {
         tabs: state.tabs.map((t) =>
-          t.id === tabId && t.kind === "terminal" ? { ...t, paneTree, activeLeafId } : t,
+          t.id === tabId ? { ...t, paneTree, activeLeafId } : t,
         ),
       };
     }),
     }),
     {
       name: TABS_STORAGE_KEY,
+      version: 1,
+      migrate: migratePersistedTabs,
       partialize: (state) => ({
         spaces: state.spaces,
         activeSpaceId: state.activeSpaceId,

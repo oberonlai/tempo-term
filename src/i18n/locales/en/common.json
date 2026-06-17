@@ -50,7 +50,8 @@
       "terminal": "Terminal",
       "editor": "File",
       "note": "Note",
-      "preview": "Preview"
+      "preview": "Preview",
+      "git-graph": "Git Graph"
     },
     "spaces": "Spaces",
     "newSpace": "New space",

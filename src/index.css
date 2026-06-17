@@ -86,18 +86,13 @@ body {
   overflow: hidden;
 }
 
-/* Thin scrollbars that match the warm dark chrome */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
-  border-radius: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+/*
+ * No custom ::-webkit-scrollbar styling on purpose. Any rule here switches
+ * WebKit (the macOS WKWebView this app runs in) from native overlay scrollbars
+ * to always-on classic ones, which float over and cover text in the default
+ * "show scroll bars when scrolling" mode. Falling back to the system overlay
+ * keeps scrollbars hidden until you scroll and off the text.
+ */
 
 /*
  * Tailwind v4 / browsers render <button> with the default arrow cursor. Give

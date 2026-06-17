@@ -25,6 +25,7 @@ import { dirname, joinPath, relativePath } from "./lib/paths";
 import { setDraggedEntry } from "./lib/dragEntry";
 import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { useTabsStore } from "@/stores/tabsStore";
+import { computeLayout } from "@/modules/terminal/lib/terminalLayout";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useChatStore } from "@/modules/ai/store/chatStore";
@@ -57,7 +58,11 @@ function TreeNode({ entry, depth, onReloadParent }: TreeNodeProps) {
   const attachPath = useChatStore((s) => s.attachPath);
   const activeEditorPath = useTabsStore((s) => {
     const active = s.tabs.find((tab) => tab.id === s.activeId);
-    return active && active.kind === "editor" ? active.path : null;
+    if (!active) {
+      return null;
+    }
+    const pane = computeLayout(active.paneTree).find((p) => p.id === active.activeLeafId);
+    return pane && pane.content.kind === "editor" ? pane.content.path : null;
   });
   const isActive = !entry.is_dir && activeEditorPath === entry.path;
 

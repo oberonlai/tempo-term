@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useTabsStore, type Tab } from "@/stores/tabsStore";
+import { computeLayout } from "@/modules/terminal/lib/terminalLayout";
 import { useEditorStore } from "@/modules/editor/store/editorStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useUiStore } from "@/stores/uiStore";
@@ -44,11 +45,19 @@ function TabItem({ id }: { id: string }) {
   const setActive = useTabsStore((s) => s.setActive);
   const closeTab = useTabsStore((s) => s.closeTab);
   const setTabTitle = useTabsStore((s) => s.setTabTitle);
-  const dirty = useEditorStore((s) =>
-    tab?.kind === "editor"
-      ? (s.buffers[tab.path]?.content ?? "") !== (s.buffers[tab.path]?.baseline ?? "")
-      : false,
-  );
+  // A tab is dirty when any of its editor panes has unsaved changes.
+  const dirty = useEditorStore((s) => {
+    if (!tab) {
+      return false;
+    }
+    return computeLayout(tab.paneTree)
+      .map((p) => p.content)
+      .some(
+        (c) =>
+          c.kind === "editor" &&
+          (s.buffers[c.path]?.content ?? "") !== (s.buffers[c.path]?.baseline ?? ""),
+      );
+  });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   if (!tab) {

@@ -95,6 +95,11 @@ export function TerminalView({
       if (event.type === "keydown") {
         const seq = terminalKeySequence(event, IS_MAC);
         if (seq) {
+          // preventDefault is essential: without it xterm's hidden textarea
+          // still receives the keystroke and emits its own bytes. For
+          // Shift+Enter that means a bare CR sneaks through after our ESC CR
+          // and submits the line. Matches the reference Terax handler.
+          event.preventDefault();
           void sessionRef.current?.write(seq);
           return false;
         }

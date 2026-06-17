@@ -1,18 +1,28 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useTabsStore, type TerminalTab } from "./tabsStore";
-import { computeLayout, leafIds } from "@/modules/terminal/lib/terminalLayout";
+import { useTabsStore, migratePersistedTabs, type Tab } from "./tabsStore";
+import {
+  computeLayout,
+  leafIds,
+  paneOf,
+  type LayoutNode,
+} from "@/modules/terminal/lib/terminalLayout";
 
 function reset() {
   useTabsStore.setState({ tabs: [], activeId: null, spaces: [], activeSpaceId: null });
 }
 
-function activeTerminal(): TerminalTab {
+function activeTab(): Tab {
   const s = useTabsStore.getState();
   const tab = s.tabs.find((t) => t.id === s.activeId);
-  if (!tab || tab.kind !== "terminal") {
-    throw new Error("active tab is not a terminal");
+  if (!tab) {
+    throw new Error("no active tab");
   }
   return tab;
+}
+
+function firstLeafContent(tab: Tab) {
+  const node = tab.paneTree as Extract<LayoutNode, { kind: "leaf" }>;
+  return paneOf(node);
 }
 
 describe("tabsStore", () => {
@@ -21,7 +31,7 @@ describe("tabsStore", () => {
   it("opens a terminal tab with a single pane and activates it", () => {
     const id = useTabsStore.getState().newTerminalTab();
     expect(useTabsStore.getState().activeId).toBe(id);
-    const tab = activeTerminal();
+    const tab = activeTab();
     expect(tab.kind).toBe("terminal");
     expect(leafIds(tab.paneTree)).toHaveLength(1);
   });
@@ -39,23 +49,22 @@ describe("tabsStore", () => {
   it("splits the active terminal tab's pane", () => {
     useTabsStore.getState().newTerminalTab();
     useTabsStore.getState().splitActivePane("row");
-    expect(leafIds(activeTerminal().paneTree)).toHaveLength(2);
+    expect(leafIds(activeTab().paneTree)).toHaveLength(2);
   });
 
-  it("does not split when the active tab is an editor", () => {
+  it("splits the active editor tab's pane", () => {
     useTabsStore.getState().openEditorTab("/a/b.ts");
     useTabsStore.getState().splitActivePane("row");
-    const tabs = useTabsStore.getState().tabs;
-    expect(tabs.every((t) => t.kind === "editor")).toBe(true);
+    expect(leafIds(activeTab().paneTree)).toHaveLength(2);
   });
 
   it("splits a pane with the given content and activates it", () => {
     useTabsStore.getState().newTerminalTab();
-    const tab = activeTerminal();
+    const tab = activeTab();
     useTabsStore
       .getState()
       .splitPaneWith(tab.id, tab.activeLeafId, { kind: "editor", path: "/x/App.tsx" }, "row");
-    const updated = activeTerminal();
+    const updated = activeTab();
     const panes = computeLayout(updated.paneTree);
     expect(panes).toHaveLength(2);
     const editor = panes.find((p) => p.content.kind === "editor");
@@ -65,27 +74,82 @@ describe("tabsStore", () => {
 
   it("can split with a note or preview pane", () => {
     useTabsStore.getState().newTerminalTab();
-    const tab = activeTerminal();
+    const tab = activeTab();
     useTabsStore
       .getState()
       .splitPaneWith(tab.id, tab.activeLeafId, { kind: "note", noteId: "n1" }, "col");
-    const panes = computeLayout(activeTerminal().paneTree);
+    const panes = computeLayout(activeTab().paneTree);
     expect(panes.some((p) => p.content.kind === "note")).toBe(true);
   });
 
-  it("closing the last pane closes the whole terminal tab", () => {
+  it("opens editor/note/preview/git-graph as single-leaf pane tabs", () => {
+    const e = useTabsStore.getState().openEditorTab("/a/b.ts");
+    expect(firstLeafContent(activeTab())).toEqual({ kind: "editor", path: "/a/b.ts" });
+    expect(
+      leafIds(useTabsStore.getState().tabs.find((t) => t.id === e)!.paneTree),
+    ).toHaveLength(1);
+
+    const n = useTabsStore.getState().openNoteTab("note-1", "My Note");
+    expect(firstLeafContent(activeTab())).toEqual({ kind: "note", noteId: "note-1" });
+    expect(useTabsStore.getState().tabs.find((t) => t.id === n)!.kind).toBe("note");
+
+    useTabsStore.getState().openPreviewTab("http://localhost:5173");
+    expect(firstLeafContent(activeTab())).toEqual({
+      kind: "preview",
+      url: "http://localhost:5173",
+    });
+
+    useTabsStore.getState().openGitGraphTab();
+    expect(firstLeafContent(activeTab())).toEqual({ kind: "git-graph" });
+  });
+
+  it("splits, resizes and closes panes on a non-terminal (editor) tab", () => {
+    const id = useTabsStore.getState().openEditorTab("/a/b.ts");
+    const leafId = activeTab().activeLeafId;
+    useTabsStore.getState().splitPaneWith(id, leafId, { kind: "terminal" }, "row");
+    const panes = computeLayout(activeTab().paneTree);
+    expect(panes).toHaveLength(2);
+    expect(panes.some((p) => p.content.kind === "terminal")).toBe(true);
+
+    const splitId = leafIds(activeTab().paneTree).slice().sort().join("|");
+    useTabsStore.getState().resizePane(id, splitId, [0.3, 0.7]);
+
+    useTabsStore.getState().closePane(id, activeTab().activeLeafId);
+    expect(leafIds(activeTab().paneTree)).toHaveLength(1);
+  });
+
+  it("dedupes note tabs by id and git-graph as a singleton", () => {
+    const first = useTabsStore.getState().openNoteTab("note-1", "X");
+    const again = useTabsStore.getState().openNoteTab("note-1", "X");
+    expect(again).toBe(first);
+
+    const g1 = useTabsStore.getState().openGitGraphTab();
+    const g2 = useTabsStore.getState().openGitGraphTab();
+    expect(g2).toBe(g1);
+  });
+
+  it("does not dedupe an editor tab once it has been split", () => {
+    const first = useTabsStore.getState().openEditorTab("/a/b.ts");
+    useTabsStore
+      .getState()
+      .splitPaneWith(first, activeTab().activeLeafId, { kind: "terminal" }, "row");
+    const second = useTabsStore.getState().openEditorTab("/a/b.ts");
+    expect(second).not.toBe(first);
+  });
+
+  it("closing the last pane closes the whole tab", () => {
     const id = useTabsStore.getState().newTerminalTab();
-    const leafId = activeTerminal().activeLeafId;
+    const leafId = activeTab().activeLeafId;
     useTabsStore.getState().closePane(id, leafId);
     expect(useTabsStore.getState().tabs.find((t) => t.id === id)).toBeUndefined();
   });
 
   it("closing one pane of a split keeps the tab and collapses the tree", () => {
     const id = useTabsStore.getState().newTerminalTab();
-    const firstLeaf = activeTerminal().activeLeafId;
+    const firstLeaf = activeTab().activeLeafId;
     useTabsStore.getState().splitActivePane("col");
-    useTabsStore.getState().closePane(id, activeTerminal().activeLeafId);
-    const tab = activeTerminal();
+    useTabsStore.getState().closePane(id, activeTab().activeLeafId);
+    const tab = activeTab();
     expect(leafIds(tab.paneTree)).toEqual([firstLeaf]);
   });
 
@@ -150,5 +214,42 @@ describe("tabsStore", () => {
     expect(useTabsStore.getState().spaces.find((s) => s.id === second)).toBeUndefined();
     expect(useTabsStore.getState().tabs.every((t) => t.spaceId !== second)).toBe(true);
     expect(useTabsStore.getState().activeSpaceId).toBe(first);
+  });
+});
+
+describe("migratePersistedTabs", () => {
+  it("migrates v0 simple tabs into single-leaf pane tabs", () => {
+    const v0 = {
+      spaces: [{ id: "s1", name: "W" }],
+      activeSpaceId: "s1",
+      activeId: "t2",
+      tabs: [
+        {
+          id: "t1",
+          spaceId: "s1",
+          kind: "terminal",
+          title: "Term",
+          paneTree: { kind: "leaf", id: "p0" },
+          activeLeafId: "p0",
+          cwd: "/tmp",
+        },
+        { id: "t2", spaceId: "s1", kind: "editor", title: "b.ts", path: "/a/b.ts" },
+        { id: "t3", spaceId: "s1", kind: "note", title: "N", noteId: "n1" },
+        { id: "t4", spaceId: "s1", kind: "preview", title: "host", url: "http://x" },
+        { id: "t5", spaceId: "s1", kind: "git-graph", title: "Git Graph" },
+      ],
+    };
+    const migrated = migratePersistedTabs(v0, 0) as { tabs: Tab[] };
+    const byId = (id: string) => migrated.tabs.find((t) => t.id === id)!;
+
+    expect(byId("t1").kind).toBe("terminal");
+    expect(byId("t1").cwd).toBe("/tmp");
+    expect(leafIds(byId("t2").paneTree)).toHaveLength(1);
+    expect(firstLeafContent(byId("t2"))).toEqual({ kind: "editor", path: "/a/b.ts" });
+    expect(firstLeafContent(byId("t3"))).toEqual({ kind: "note", noteId: "n1" });
+    expect(firstLeafContent(byId("t4"))).toEqual({ kind: "preview", url: "http://x" });
+    expect(firstLeafContent(byId("t5"))).toEqual({ kind: "git-graph" });
+    expect(byId("t2").title).toBe("b.ts");
+    expect(byId("t2").activeLeafId).toBe(leafIds(byId("t2").paneTree)[0]);
   });
 });

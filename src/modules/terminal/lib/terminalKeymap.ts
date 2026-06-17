@@ -25,7 +25,11 @@ export interface NavKeyEvent {
 export function terminalKeySequence(event: NavKeyEvent, isMac: boolean): string | null {
   const { key, ctrlKey, metaKey, altKey, shiftKey } = event;
 
-  // Shift+Enter → newline without submitting
+  // Shift+Enter → ESC CR, the same bytes macOS Option+Enter sends. Claude Code
+  // and similar CLIs treat that as "insert a newline" rather than submit. This
+  // matches the reference Terax terminal. The caller MUST preventDefault on
+  // this key, otherwise xterm's hidden textarea also emits a bare CR and the
+  // line gets submitted anyway.
   if (key === "Enter" && shiftKey && !ctrlKey && !metaKey && !altKey) {
     return "\x1b\r";
   }

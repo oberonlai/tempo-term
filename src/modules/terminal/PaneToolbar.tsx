@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import {
   FilePlus,
+  GitBranch,
   Globe,
   NotebookPen,
   SquareTerminal,
@@ -40,6 +41,11 @@ const PANE_TYPES: PaneType[] = [
     key: "preview",
     icon: Globe,
     make: async () => ({ kind: "preview", url: DEFAULT_PREVIEW_URL }),
+  },
+  {
+    key: "git-graph",
+    icon: GitBranch,
+    make: async () => ({ kind: "git-graph" }),
   },
 ];
 

@@ -129,3 +129,11 @@ describe("computeSplitters", () => {
     expect(after.find((s) => s.direction === "row")!.fraction).toBeCloseTo(0.5);
   });
 });
+
+describe("git-graph pane content", () => {
+  it("can hold a git-graph pane in a split", () => {
+    const tree = splitLeaf(leaf("a"), "a", "row", "b", { kind: "git-graph" });
+    const panes = computeLayout(tree);
+    expect(panes.some((p) => p.content.kind === "git-graph")).toBe(true);
+  });
+});

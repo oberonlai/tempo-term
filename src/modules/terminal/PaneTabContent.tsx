@@ -13,15 +13,21 @@ import {
 import { EditorTabContent } from "@/modules/editor/EditorTabContent";
 import { NoteTabContent } from "@/modules/notes/NoteTabContent";
 import { PreviewTabContent } from "@/modules/preview/PreviewTabContent";
+import { GitGraphTabContent } from "@/modules/git-graph/GitGraphTabContent";
 import { EntryDropOverlay, useEntryDragging } from "@/components/EntryDropOverlay";
 import { fileUrl, shellQuotePath, type DraggedEntry } from "@/modules/explorer/lib/dragEntry";
 import { insertLinkIntoNote } from "@/modules/notes/lib/noteBus";
-import { useTabsStore, type TerminalTab } from "@/stores/tabsStore";
+import { useTabsStore, type Tab } from "@/stores/tabsStore";
 
 const MIN_FRACTION = 0.1;
 const MAX_FRACTION = 0.9;
 
-export function TerminalTabContent({ tab }: { tab: TerminalTab }) {
+/**
+ * Renders one tab as a recursive split of panes. Each leaf shows a terminal,
+ * editor, note, preview, or git graph, and the toolbar splits the active pane
+ * into any of those. Works for every tab kind, not just terminals.
+ */
+export function PaneTabContent({ tab }: { tab: Tab }) {
   const { t } = useTranslation();
   const setActiveLeaf = useTabsStore((s) => s.setActiveLeaf);
   const resizePane = useTabsStore((s) => s.resizePane);
@@ -144,6 +150,8 @@ export function TerminalTabContent({ tab }: { tab: TerminalTab }) {
                 <NoteTabContent noteId={pane.content.noteId} tabId={tab.id} />
               ) : pane.content.kind === "preview" ? (
                 <PreviewTabContent url={pane.content.url} />
+              ) : pane.content.kind === "git-graph" ? (
+                <GitGraphTabContent />
               ) : (
                 <TerminalView
                   active={active}

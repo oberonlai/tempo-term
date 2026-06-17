@@ -50,7 +50,8 @@
       "terminal": "終端機",
       "editor": "檔案",
       "note": "筆記",
-      "preview": "網頁預覽"
+      "preview": "網頁預覽",
+      "git-graph": "Git 線圖"
     },
     "spaces": "工作空間",
     "newSpace": "新增工作空間",
