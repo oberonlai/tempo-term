@@ -419,28 +419,42 @@ fn parse_graph_commit(line: &str) -> Option<GraphCommit> {
     })
 }
 
-/// Read the commit DAG for the Git graph view. `limit` caps how many commits
-/// are returned; one extra is fetched internally to compute `has_more`.
-pub fn graph_log(repo_path: &str, limit: usize, skip: usize) -> Result<GraphLog, String> {
+/// 讀取線圖的 commit DAG。`limit` 限制回傳數量，內部多抓一筆算 `has_more`。
+/// `options` 決定要畫哪些分支、要不要含遠端/標籤/stash。
+pub fn graph_log(
+    repo_path: &str,
+    limit: usize,
+    skip: usize,
+    options: &GraphOptions,
+) -> Result<GraphLog, String> {
     let limit = limit.clamp(1, 2000);
     let max_count = format!("--max-count={}", limit + 1);
     let skip_arg = format!("--skip={skip}");
-    let stdout = run_git(
-        repo_path,
-        &[
-            "log",
-            "--all",
-            "--topo-order",
-            "--decorate=full",
-            "--pretty=format:%h|%p|%an|%ad|%d|%s",
-            "--date=format-local:%Y-%m-%d %H:%M",
-            &max_count,
-            &skip_arg,
-        ],
-    )
-    // An empty repo (no commits yet) makes `git log` exit non-zero; treat that
-    // as an empty graph rather than an error.
-    .unwrap_or_default();
+
+    // 指定分支會當成位置參數傳給 git，先擋掉開頭是 - 的值。
+    if let Some(branch) = options
+        .branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+    {
+        ensure_not_flag(branch)?;
+    }
+
+    let ref_args = build_log_refs(options);
+    let mut args: Vec<&str> = vec![
+        "log",
+        "--topo-order",
+        "--decorate=full",
+        "--pretty=format:%h|%p|%an|%ad|%d|%s",
+        "--date=format-local:%Y-%m-%d %H:%M",
+        &max_count,
+        &skip_arg,
+    ];
+    args.extend(ref_args.iter().map(String::as_str));
+
+    // 空 repo（還沒任何 commit）會讓 git log 非零退出，當成空線圖。
+    let stdout = run_git(repo_path, &args).unwrap_or_default();
 
     let mut commits: Vec<GraphCommit> = stdout.lines().filter_map(parse_graph_commit).collect();
     let has_more = commits.len() > limit;
@@ -604,8 +618,14 @@ pub fn git_graph_log(
     repo_path: String,
     limit: Option<usize>,
     skip: Option<usize>,
+    options: Option<GraphOptions>,
 ) -> Result<GraphLog, String> {
-    graph_log(&repo_path, limit.unwrap_or(300), skip.unwrap_or(0))
+    graph_log(
+        &repo_path,
+        limit.unwrap_or(300),
+        skip.unwrap_or(0),
+        &options.unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -731,7 +751,7 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "two\n").unwrap();
         run_git(&path, &["commit", "-am", "second"]).unwrap();
 
-        let log = graph_log(&path, 10, 0).unwrap();
+        let log = graph_log(&path, 10, 0, &GraphOptions::default()).unwrap();
         assert_eq!(log.commits.len(), 2);
         assert!(!log.has_more);
         // Newest first; the HEAD ref decorates the tip.
@@ -742,7 +762,7 @@ mod tests {
             .any(|r| r.kind == "head" && r.name == "main"));
 
         // has_more is true once the page is smaller than the history.
-        let page = graph_log(&path, 1, 0).unwrap();
+        let page = graph_log(&path, 1, 0, &GraphOptions::default()).unwrap();
         assert_eq!(page.commits.len(), 1);
         assert!(page.has_more);
 
@@ -773,7 +793,7 @@ mod tests {
 
         // Tag the commit, then it should decorate the graph node.
         tag_create(&path, "v1", &head, Some("release")).unwrap();
-        let log = graph_log(&path, 10, 0).unwrap();
+        let log = graph_log(&path, 10, 0, &GraphOptions::default()).unwrap();
         assert!(log.commits[0].refs.iter().any(|r| r.kind == "tag" && r.name == "v1"));
 
         // Back to main, then the feature branch can be deleted.
@@ -782,7 +802,7 @@ mod tests {
         assert!(!branches(&path).unwrap().iter().any(|b| b.name == "feature"));
 
         tag_delete(&path, "v1").unwrap();
-        let log = graph_log(&path, 10, 0).unwrap();
+        let log = graph_log(&path, 10, 0, &GraphOptions::default()).unwrap();
         assert!(!log.commits[0].refs.iter().any(|r| r.kind == "tag"));
 
         // Empty-name guards surface as errors instead of running git.
