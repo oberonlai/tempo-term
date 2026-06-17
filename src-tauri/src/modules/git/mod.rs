@@ -376,6 +376,12 @@ pub fn parse_refs(decoration: &str) -> Vec<GraphRef> {
                     kind: "remote".to_string(),
                 });
             }
+            if token == "refs/stash" {
+                return Some(GraphRef {
+                    name: "stash".to_string(),
+                    kind: "stash".to_string(),
+                });
+            }
             if let Some(rest) = token.strip_prefix("refs/tags/") {
                 return Some(GraphRef {
                     name: rest.to_string(),
@@ -721,6 +727,18 @@ mod tests {
         assert!(parse_refs("   ").is_empty());
         let refs = parse_refs(" (HEAD)");
         assert_eq!(refs, vec![GraphRef { name: "HEAD".into(), kind: "head".into() }]);
+    }
+
+    #[test]
+    fn parse_refs_stash() {
+        let refs = parse_refs(" (refs/stash)");
+        assert_eq!(
+            refs,
+            vec![GraphRef {
+                name: "stash".to_string(),
+                kind: "stash".to_string(),
+            }]
+        );
     }
 
     #[test]
