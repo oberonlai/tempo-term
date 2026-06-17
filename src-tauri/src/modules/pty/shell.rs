@@ -53,9 +53,35 @@ pub fn terminal_env(existing_lang: Option<String>) -> Vec<(String, String)> {
     env
 }
 
+/// Login-shell flag so the shell sources its profile (`~/.zprofile`, and on
+/// macOS `/etc/zprofile`'s `path_helper`) and inherits the full login PATH —
+/// Homebrew's `/opt/homebrew/bin` in particular. A GUI-launched terminal
+/// otherwise runs a non-login shell that misses those paths, so tools like `gh`
+/// and `pngpaste` are not found.
+pub fn login_args(shell: &str) -> Vec<String> {
+    let name = shell.rsplit('/').next().unwrap_or(shell);
+    match name {
+        "zsh" | "bash" | "fish" => vec!["-l".to_string()],
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launches_known_shells_as_login_shells() {
+        assert_eq!(login_args("/bin/zsh"), vec!["-l".to_string()]);
+        assert_eq!(login_args("/bin/bash"), vec!["-l".to_string()]);
+        assert_eq!(login_args("/usr/local/bin/fish"), vec!["-l".to_string()]);
+    }
+
+    #[test]
+    fn leaves_unknown_shells_without_a_login_flag() {
+        assert!(login_args("powershell.exe").is_empty());
+        assert!(login_args("/usr/bin/nu").is_empty());
+    }
 
     #[test]
     fn uses_shell_env_when_set() {

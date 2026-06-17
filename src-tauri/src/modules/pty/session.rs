@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtyPair, PtySize};
 use tauri::ipc::{Channel, Response};
 
-use super::shell::{resolve_shell, terminal_env};
+use super::shell::{login_args, resolve_shell, terminal_env};
 
 /// A single live terminal session.
 pub struct Session {
@@ -59,6 +59,11 @@ fn pty_size(cols: u16, rows: u16) -> PtySize {
 fn build_shell_command(cwd: Option<String>) -> (CommandBuilder, String) {
     let shell = resolve_shell();
     let mut cmd = CommandBuilder::new(&shell);
+    // Run as a login shell so it sources the user's profile and inherits the
+    // full PATH (Homebrew etc.); a GUI-launched non-login shell misses those.
+    for arg in login_args(&shell) {
+        cmd.arg(arg);
+    }
     if let Some(dir) = cwd.filter(|d| !d.trim().is_empty()) {
         cmd.cwd(dir);
     }
