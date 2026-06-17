@@ -20,6 +20,7 @@ import {
   gitBranchDelete,
   gitBranches,
   gitCherryPick,
+  gitFetch,
   gitGraphLog,
   gitMerge,
   gitReset,
@@ -27,7 +28,9 @@ import {
   gitTagCreate,
   gitTagDelete,
 } from "./lib/gitGraphBridge";
-import type { Branch, CommitNode, CommitRef } from "./types";
+import { GitGraphToolbar, type GitGraphToolbarLabels } from "./GitGraphToolbar";
+import { filterCommits } from "./lib/filterCommits";
+import type { Branch, CommitNode, CommitRef, GraphOptions } from "./types";
 
 const PAGE_SIZE = 200;
 
@@ -67,13 +70,29 @@ export function GitGraphTabContent() {
   const [modal, setModal] = useState<ModalState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  const [includeRemotes, setIncludeRemotes] = useState(true);
+  const [includeTags, setIncludeTags] = useState(true);
+  const [includeStashes, setIncludeStashes] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [fetching, setFetching] = useState(false);
+
+  const options: GraphOptions = {
+    branch: selectedBranch,
+    includeRemotes,
+    includeTags,
+    includeStashes,
+  };
+
+  const visibleCommits = filterCommits(commits, searchQuery);
+
   const currentBranch = branches.find((b) => b.isCurrent)?.name ?? "—";
 
   const reload = useCallback(
-    async (repoPath: string, nextLimit: number) => {
+    async (repoPath: string, nextLimit: number, opts: GraphOptions) => {
       try {
         const [log, branchList] = await Promise.all([
-          gitGraphLog(repoPath, nextLimit),
+          gitGraphLog(repoPath, nextLimit, opts),
           gitBranches(repoPath),
         ]);
         setCommits(log.commits);
@@ -89,7 +108,7 @@ export function GitGraphTabContent() {
     [],
   );
 
-  // Resolve the repo from the workspace root, then load the first page.
+  // Resolve the repo from the workspace root.
   useEffect(() => {
     if (!rootPath) {
       setResolved(true);
@@ -99,15 +118,11 @@ export function GitGraphTabContent() {
     let cancelled = false;
     setResolved(false);
     gitResolveRepo(rootPath)
-      .then(async (resolvedRepo) => {
+      .then((resolvedRepo) => {
         if (cancelled) {
           return;
         }
         setRepo(resolvedRepo);
-        if (resolvedRepo) {
-          setLimit(PAGE_SIZE);
-          await reload(resolvedRepo, PAGE_SIZE);
-        }
         setResolved(true);
       })
       .catch(() => {
@@ -119,7 +134,21 @@ export function GitGraphTabContent() {
     return () => {
       cancelled = true;
     };
-  }, [rootPath, reload]);
+  }, [rootPath]);
+
+  // Initial load, and reload whenever a display option changes.
+  useEffect(() => {
+    if (!repo) {
+      return;
+    }
+    setLimit(PAGE_SIZE);
+    void reload(repo, PAGE_SIZE, {
+      branch: selectedBranch,
+      includeRemotes,
+      includeTags,
+      includeStashes,
+    });
+  }, [repo, selectedBranch, includeRemotes, includeTags, includeStashes, reload]);
 
   // Run an action then refresh the graph; surface any failure inline.
   const runAction = useCallback(
@@ -130,12 +159,12 @@ export function GitGraphTabContent() {
       setError(null);
       try {
         await action();
-        await reload(repo, limit);
+        await reload(repo, limit, options);
       } catch (err: unknown) {
         setError(getErrorMessage(err));
       }
     },
-    [repo, limit, reload],
+    [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes],
   );
 
   const loadMore = useCallback(() => {
@@ -144,8 +173,42 @@ export function GitGraphTabContent() {
     }
     const next = limit + PAGE_SIZE;
     setLimit(next);
-    void reload(repo, next);
-  }, [repo, limit, reload]);
+    void reload(repo, next, options);
+  }, [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes]);
+
+  const handleFetch = useCallback(async () => {
+    if (!repo) {
+      return;
+    }
+    setError(null);
+    setFetching(true);
+    try {
+      await gitFetch(repo);
+      await reload(repo, limit, options);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
+    } finally {
+      setFetching(false);
+    }
+  }, [repo, limit, reload, options]);
+
+  const toolbarLabels: GitGraphToolbarLabels = {
+    branches: t("toolbar.branches"),
+    showAll: t("toolbar.showAll"),
+    showRemoteBranches: t("toolbar.showRemoteBranches"),
+    localGroup: t("toolbar.localGroup"),
+    remoteGroup: t("toolbar.remoteGroup"),
+    search: t("toolbar.search"),
+    searchPlaceholder: t("toolbar.searchPlaceholder"),
+    displayOptions: t("toolbar.displayOptions"),
+    showTags: t("toolbar.showTags"),
+    showStashes: t("toolbar.showStashes"),
+    refresh: t("toolbar.refresh"),
+    fetch: t("toolbar.fetch"),
+    fetching: t("toolbar.fetching"),
+    matches: t("toolbar.matches"),
+    head: t("toolbar.head"),
+  };
 
   const labels: GitGraphLabels = {
     title: t("title"),
@@ -309,9 +372,31 @@ export function GitGraphTabContent() {
         </div>
       )}
 
+      <div className="mb-2">
+        <GitGraphToolbar
+          branches={branches}
+          selectedBranch={selectedBranch}
+          onSelectBranch={setSelectedBranch}
+          includeRemotes={includeRemotes}
+          onToggleRemotes={setIncludeRemotes}
+          includeTags={includeTags}
+          onToggleTags={setIncludeTags}
+          includeStashes={includeStashes}
+          onToggleStashes={setIncludeStashes}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          matchCount={visibleCommits.length}
+          onRefresh={() => void runAction(async () => {})}
+          onFetch={() => void handleFetch()}
+          fetching={fetching}
+          currentBranch={currentBranch}
+          labels={toolbarLabels}
+        />
+      </div>
+
       <div className="min-h-0 flex-1">
         <GitGraph
-          commits={commits}
+          commits={visibleCommits}
           currentBranch={currentBranch}
           selectedCommit={selected}
           onSelectCommit={setSelected}
