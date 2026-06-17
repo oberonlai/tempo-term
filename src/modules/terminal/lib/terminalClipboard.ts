@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export function terminalClipboardPaths(): Promise<string[]> {
+  return invoke<string[]>("terminal_clipboard_paths");
+}
+
 export function terminalClipboardImagePaths(): Promise<string[]> {
   return invoke<string[]>("terminal_clipboard_image_paths");
 }
@@ -33,7 +37,15 @@ export function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp)$/i.test(path);
 }
 
+export function shouldAttachImage(command: string | null | undefined, paths: string[]): boolean {
+  return isImageAttachmentCli(command) && paths.length === 1 && isImagePath(paths[0]);
+}
+
 export function formatImagePathsForTerminal(paths: string[]): string {
+  return formatPathsForTerminal(paths);
+}
+
+export function formatPathsForTerminal(paths: string[]): string {
   return paths.length > 0 ? `${paths.map(shellQuotePath).join(" ")} ` : "";
 }
 

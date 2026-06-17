@@ -3,12 +3,16 @@ import { isImagePath } from "./terminalClipboard";
 type FileWithPath = File & { path?: string };
 
 export function imagePathsFromDrop(data: DataTransfer): string[] {
+  return pathsFromDrop(data).filter(isImagePath);
+}
+
+export function pathsFromDrop(data: DataTransfer): string[] {
   const candidates = [
     ...pathsFromUriList(data.getData("text/uri-list")),
     ...pathsFromPlainText(data.getData("text/plain")),
     ...pathsFromFiles(data.files),
   ];
-  return unique(candidates.filter(isImagePath));
+  return unique(candidates);
 }
 
 export function imageFilesFromDrop(data: DataTransfer): File[] {

@@ -7,7 +7,7 @@ use modules::fs::{
 };
 use modules::ai::ai_chat;
 use modules::clipboard::{
-    terminal_clipboard_image_paths, terminal_clipboard_text,
+    terminal_clipboard_image_paths, terminal_clipboard_paths, terminal_clipboard_text,
     terminal_prepare_clipboard_image_attachment, terminal_save_dropped_image,
 };
 use modules::git::{
@@ -38,6 +38,7 @@ pub fn run() {
             pty_cwd,
             pty_close,
             pty_close_all,
+            terminal_clipboard_paths,
             terminal_clipboard_image_paths,
             terminal_clipboard_text,
             terminal_prepare_clipboard_image_attachment,

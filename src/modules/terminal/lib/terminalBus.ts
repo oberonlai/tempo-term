@@ -1,9 +1,12 @@
 import { useTabsStore } from "@/stores/tabsStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { formatPathsForTerminal } from "./terminalClipboard";
 
 type Writer = (text: string) => void;
+type PathDropHandler = (paths: string[]) => boolean | Promise<boolean>;
 
 const writers = new Map<string, Writer>();
+const pathDropHandlers = new Map<string, PathDropHandler>();
 const pending = new Map<string, string[]>();
 
 /** A terminal pane registers how to write to its shell, keyed by its leaf id. */
@@ -20,6 +23,14 @@ export function unregisterTerminal(leafId: string): void {
   writers.delete(leafId);
 }
 
+export function registerTerminalPathDrop(leafId: string, drop: PathDropHandler): void {
+  pathDropHandlers.set(leafId, drop);
+}
+
+export function unregisterTerminalPathDrop(leafId: string): void {
+  pathDropHandlers.delete(leafId);
+}
+
 /** Write to a specific pane, queueing until it registers (fresh PTYs). */
 export function writeToTerminal(leafId: string, text: string): void {
   const write = writers.get(leafId);
@@ -30,6 +41,30 @@ export function writeToTerminal(leafId: string, text: string): void {
     queue.push(text);
     pending.set(leafId, queue);
   }
+}
+
+/** Drop file/folder paths into a terminal pane, letting it decide CLI-specific behavior. */
+export function dropPathsIntoTerminal(leafId: string, paths: string[]): boolean {
+  const drop = pathDropHandlers.get(leafId);
+  if (!drop) {
+    return false;
+  }
+  const fallback = () => writeToTerminal(leafId, formatPathsForTerminal(paths));
+  try {
+    const handled = drop(paths);
+    if (handled instanceof Promise) {
+      handled.then((ok) => {
+        if (!ok) {
+          fallback();
+        }
+      });
+    } else if (!handled) {
+      fallback();
+    }
+  } catch {
+    fallback();
+  }
+  return true;
 }
 
 /**

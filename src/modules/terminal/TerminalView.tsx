@@ -2,16 +2,21 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
 import { createTerminal, type TerminalHandle } from "./lib/createTerminal";
 import { openPty, type PtySession } from "./lib/pty-bridge";
-import { registerTerminal, unregisterTerminal } from "./lib/terminalBus";
-import { imageFilesFromDrop, imagePathsFromDrop } from "./lib/terminalDrop";
 import {
-  formatImagePathsForTerminal,
-  isImageAttachmentCli,
-  isImagePath,
+  registerTerminal,
+  registerTerminalPathDrop,
+  unregisterTerminal,
+  unregisterTerminalPathDrop,
+} from "./lib/terminalBus";
+import { imageFilesFromDrop, pathsFromDrop } from "./lib/terminalDrop";
+import {
+  formatPathsForTerminal,
   prepareClipboardImageAttachment,
   saveDroppedImage,
   terminalClipboardImagePaths,
+  terminalClipboardPaths,
   terminalClipboardText,
+  shouldAttachImage,
 } from "./lib/terminalClipboard";
 import { findFilePaths, resolveFilePath } from "./lib/fileLinks";
 import { terminalKeySequence } from "./lib/terminalKeymap";
@@ -79,7 +84,7 @@ export function TerminalView({
   const fontSize = useFontStore((s) => s.fontSize);
   const themeId = useSettingsStore((s) => s.themeId);
   const terminalPadding = useSettingsStore((s) => s.terminalPadding);
-  const [externalImageDragging, setExternalImageDragging] = useState(false);
+  const [externalFileDragging, setExternalFileDragging] = useState(false);
   const dragDepthRef = useRef(0);
   const nativeDragPathsRef = useRef<string[]>([]);
 
@@ -105,16 +110,26 @@ export function TerminalView({
       if (!session) {
         return;
       }
-      const [command, paths] = await Promise.all([
+      const [command, clipboardPaths] = await Promise.all([
         session.foregroundCommand().catch(() => null),
-        terminalClipboardImagePaths().catch(() => []),
+        terminalClipboardPaths().catch(() => []),
       ]);
-      if (paths.length > 0) {
-        if (isImageAttachmentCli(command)) {
-          await prepareClipboardImageAttachment(paths[0]).catch(() => {});
+      if (clipboardPaths.length > 0) {
+        if (shouldAttachImage(command, clipboardPaths)) {
+          await prepareClipboardImageAttachment(clipboardPaths[0]).catch(() => {});
           await session.write("\x16");
         } else {
-          term.paste(formatImagePathsForTerminal(paths));
+          term.paste(formatPathsForTerminal(clipboardPaths));
+        }
+        return;
+      }
+      const imagePaths = await terminalClipboardImagePaths().catch(() => []);
+      if (imagePaths.length > 0) {
+        if (shouldAttachImage(command, imagePaths)) {
+          await prepareClipboardImageAttachment(imagePaths[0]).catch(() => {});
+          await session.write("\x16");
+        } else {
+          term.paste(formatPathsForTerminal(imagePaths));
         }
         return;
       }
@@ -337,6 +352,7 @@ export function TerminalView({
         term.onData((data) => void session.write(data));
         if (leafIdRef.current) {
           registerTerminal(leafIdRef.current, (text) => void session.write(text));
+          registerTerminalPathDrop(leafIdRef.current, (paths) => handlePathDrop(paths));
         }
       })
       .catch((error: unknown) => {
@@ -360,6 +376,7 @@ export function TerminalView({
       document.removeEventListener("paste", onPasteCapture, true);
       if (leafIdRef.current) {
         unregisterTerminal(leafIdRef.current);
+        unregisterTerminalPathDrop(leafIdRef.current);
       }
       void sessionRef.current?.close();
       term.dispose();
@@ -477,15 +494,18 @@ export function TerminalView({
     let unlisten: (() => void) | null = null;
 
     const pointInContainer = (x: number, y: number): boolean => {
-      let lx = x;
-      let ly = y;
-      if (x > window.innerWidth || y > window.innerHeight) {
-        const dpr = window.devicePixelRatio || 1;
-        lx = x / dpr;
-        ly = y / dpr;
-      }
       const rect = container.getBoundingClientRect();
-      return lx >= rect.left && lx <= rect.right && ly >= rect.top && ly <= rect.bottom;
+      const dpr = window.devicePixelRatio || 1;
+      const points =
+        dpr === 1
+          ? [[x, y]]
+          : [
+              [x, y],
+              [x / dpr, y / dpr],
+            ];
+      return points.some(
+        ([lx, ly]) => lx >= rect.left && lx <= rect.right && ly >= rect.top && ly <= rect.bottom,
+      );
     };
 
     void getCurrentWebview()
@@ -496,28 +516,30 @@ export function TerminalView({
         const payload = event.payload;
         if (payload.type === "leave") {
           nativeDragPathsRef.current = [];
-          setExternalImageDragging(false);
-          return;
-        }
-        if (!pointInContainer(payload.position.x, payload.position.y)) {
-          setExternalImageDragging(false);
+          setExternalFileDragging(false);
           return;
         }
         if (payload.type === "enter") {
-          const paths = payload.paths.filter(isImagePath);
+          const paths = payload.paths;
           nativeDragPathsRef.current = paths;
-          setExternalImageDragging(paths.length > 0);
+          setExternalFileDragging(
+            paths.length > 0 && pointInContainer(payload.position.x, payload.position.y),
+          );
+          return;
+        }
+        if (!pointInContainer(payload.position.x, payload.position.y)) {
+          setExternalFileDragging(false);
           return;
         }
         if (payload.type === "over") {
-          setExternalImageDragging(nativeDragPathsRef.current.length > 0);
+          setExternalFileDragging(nativeDragPathsRef.current.length > 0);
           return;
         }
-        const paths = payload.paths.filter(isImagePath);
+        const paths = payload.paths;
         nativeDragPathsRef.current = [];
-        setExternalImageDragging(false);
+        setExternalFileDragging(false);
         if (paths.length > 0) {
-          void handleImagePathDrop(paths);
+          void handlePathDrop(paths);
         }
       })
       .then((fn) => {
@@ -532,48 +554,47 @@ export function TerminalView({
     return () => {
       disposed = true;
       nativeDragPathsRef.current = [];
-      setExternalImageDragging(false);
+      setExternalFileDragging(false);
       unlisten?.();
     };
   }, []);
 
   // Match the padding gutter to the terminal's own background so the inset
   // reads as breathing room rather than a different-coloured frame.
-  function isExternalImageDrag(data: DataTransfer): boolean {
+  function isExternalFileDrag(data: DataTransfer): boolean {
     if (getDraggedEntry()) {
       return false;
     }
-    const hasImageItem = Array.from(data.items).some(
-      (item) => item.kind === "file" && item.type.startsWith("image/"),
-    );
     return (
-      hasImageItem ||
-      Array.from(data.files).some((file) => file.type.startsWith("image/")) ||
-      imagePathsFromDrop(data).length > 0
+      Array.from(data.items).some((item) => item.kind === "file") ||
+      data.files.length > 0 ||
+      pathsFromDrop(data).length > 0
     );
   }
 
-  async function handleImagePathDrop(paths: string[], files: File[] = []) {
+  async function handlePathDrop(paths: string[], files: File[] = []): Promise<boolean> {
     const session = sessionRef.current;
     const handle = handleRef.current;
     if (!session || !handle) {
-      return;
+      return false;
     }
+    handle.term.focus();
     const resolvedPaths =
       paths.length > 0
         ? paths
         : await Promise.all(files.map((file) => saveDroppedImage(file).catch(() => "")));
-    const imagePaths = resolvedPaths.filter(Boolean);
-    if (imagePaths.length === 0) {
-      return;
+    const filePaths = resolvedPaths.filter(Boolean);
+    if (filePaths.length === 0) {
+      return false;
     }
     const command = await session.foregroundCommand().catch(() => null);
-    if (isImageAttachmentCli(command)) {
-      await prepareClipboardImageAttachment(imagePaths[0]).catch(() => {});
+    if (shouldAttachImage(command, filePaths)) {
+      await prepareClipboardImageAttachment(filePaths[0]).catch(() => {});
       await session.write("\x16");
-      return;
+      return true;
     }
-    handle.term.paste(formatImagePathsForTerminal(imagePaths));
+    handle.term.paste(formatPathsForTerminal(filePaths));
+    return true;
   }
 
   return (
@@ -588,12 +609,12 @@ export function TerminalView({
         if (nativeDragPathsRef.current.length > 0) {
           return;
         }
-        if (!isExternalImageDrag(event.dataTransfer)) {
+        if (!isExternalFileDrag(event.dataTransfer)) {
           return;
         }
         event.preventDefault();
         dragDepthRef.current += 1;
-        setExternalImageDragging(true);
+        setExternalFileDragging(true);
       }}
       onDragOver={(event) => {
         if (nativeDragPathsRef.current.length > 0) {
@@ -601,23 +622,23 @@ export function TerminalView({
           event.dataTransfer.dropEffect = "copy";
           return;
         }
-        if (!isExternalImageDrag(event.dataTransfer)) {
+        if (!isExternalFileDrag(event.dataTransfer)) {
           return;
         }
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
-        setExternalImageDragging(true);
+        setExternalFileDragging(true);
       }}
       onDragLeave={(event) => {
         if (nativeDragPathsRef.current.length > 0) {
           return;
         }
-        if (!isExternalImageDrag(event.dataTransfer)) {
+        if (!isExternalFileDrag(event.dataTransfer)) {
           return;
         }
         dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
         if (dragDepthRef.current === 0) {
-          setExternalImageDragging(false);
+          setExternalFileDragging(false);
         }
       }}
       onDrop={(event) => {
@@ -626,22 +647,22 @@ export function TerminalView({
           const paths = nativeDragPathsRef.current;
           nativeDragPathsRef.current = [];
           dragDepthRef.current = 0;
-          setExternalImageDragging(false);
-          void handleImagePathDrop(paths);
+          setExternalFileDragging(false);
+          void handlePathDrop(paths);
           return;
         }
-        if (!isExternalImageDrag(event.dataTransfer)) {
+        if (!isExternalFileDrag(event.dataTransfer)) {
           return;
         }
         event.preventDefault();
         dragDepthRef.current = 0;
-        setExternalImageDragging(false);
-        const paths = imagePathsFromDrop(event.dataTransfer);
+        setExternalFileDragging(false);
+        const paths = pathsFromDrop(event.dataTransfer);
         const files = imageFilesFromDrop(event.dataTransfer);
-        void handleImagePathDrop(paths, files);
+        void handlePathDrop(paths, files);
       }}
     >
-      {externalImageDragging && <div className={dropOverlayClassName(true)} />}
+      {externalFileDragging && <div className={dropOverlayClassName(true)} />}
     </div>
   );
 }

@@ -8,6 +8,11 @@ use std::{
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 #[tauri::command]
+pub fn terminal_clipboard_paths() -> Result<Vec<String>, String> {
+    clipboard_paths()
+}
+
+#[tauri::command]
 pub fn terminal_clipboard_image_paths() -> Result<Vec<String>, String> {
     clipboard_image_paths()
 }
@@ -39,8 +44,18 @@ pub fn terminal_save_dropped_image(
 }
 
 #[cfg(target_os = "macos")]
+fn clipboard_paths() -> Result<Vec<String>, String> {
+    Ok(unique_paths(macos_clipboard_file_paths()?))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clipboard_paths() -> Result<Vec<String>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(target_os = "macos")]
 fn clipboard_image_paths() -> Result<Vec<String>, String> {
-    let image_paths: Vec<String> = macos_clipboard_file_paths()?
+    let image_paths: Vec<String> = clipboard_paths()?
         .into_iter()
         .filter(|path| is_image_path(Path::new(path)))
         .collect();
@@ -258,6 +273,16 @@ fn image_extension(name: Option<&str>, mime: Option<&str>, bytes: &[u8]) -> Opti
         .map(|ext| if ext == "jpeg" { "jpg" } else { ext })
 }
 
+fn unique_paths(paths: Vec<String>) -> Vec<String> {
+    let mut unique = Vec::new();
+    for path in paths {
+        if !unique.contains(&path) {
+            unique.push(path);
+        }
+    }
+    unique
+}
+
 fn unique_temp_image_path(ext: &str) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join("tempoterm-clipboard-images");
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create image temp dir: {e}"))?;
@@ -287,7 +312,7 @@ fn applescript_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{image_extension, is_image_path};
+    use super::{image_extension, is_image_path, unique_paths};
     use std::path::Path;
 
     #[test]
@@ -302,5 +327,13 @@ mod tests {
         assert_eq!(image_extension(None, Some("image/png"), &[]), Some("png"));
         assert_eq!(image_extension(Some("a.jpeg"), None, &[]), Some("jpg"));
         assert_eq!(image_extension(None, None, b"\x89PNG\r\n"), Some("png"));
+    }
+
+    #[test]
+    fn unique_paths_preserves_first_seen_order() {
+        assert_eq!(
+            unique_paths(vec!["/a".into(), "/b".into(), "/a".into()]),
+            vec!["/a".to_string(), "/b".to_string()]
+        );
     }
 }

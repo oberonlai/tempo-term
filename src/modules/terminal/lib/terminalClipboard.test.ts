@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   formatImagePathsForTerminal,
+  formatPathsForTerminal,
   isImageAttachmentCli,
   isImagePath,
   shellQuotePath,
+  shouldAttachImage,
 } from "./terminalClipboard";
 
 describe("terminal clipboard helpers", () => {
@@ -22,9 +24,22 @@ describe("terminal clipboard helpers", () => {
     expect(formatImagePathsForTerminal([])).toBe("");
   });
 
+  it("formats any file or folder path with shell quoting", () => {
+    expect(formatPathsForTerminal(["/tmp/a folder", "/Applications"])).toBe(
+      "'/tmp/a folder' /Applications ",
+    );
+  });
+
   it("detects supported image paths", () => {
     expect(isImagePath("/tmp/a.PNG")).toBe(true);
     expect(isImagePath("/tmp/a.txt")).toBe(false);
+  });
+
+  it("only attaches a single image path for image-aware CLIs", () => {
+    expect(shouldAttachImage("claude", ["/tmp/a.png"])).toBe(true);
+    expect(shouldAttachImage("claude", ["/tmp/a.txt"])).toBe(false);
+    expect(shouldAttachImage("claude", ["/tmp/a.png", "/tmp/b.png"])).toBe(false);
+    expect(shouldAttachImage("zsh", ["/tmp/a.png"])).toBe(false);
   });
 
   it("shell-quotes paths only when needed", () => {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { fileUriToPath, imageFilesFromDrop, imagePathsFromDrop } from "./terminalDrop";
+import {
+  fileUriToPath,
+  imageFilesFromDrop,
+  imagePathsFromDrop,
+  pathsFromDrop,
+} from "./terminalDrop";
 
 describe("terminal drop helpers", () => {
   it("converts file URIs to local paths", () => {
@@ -22,6 +27,22 @@ describe("terminal drop helpers", () => {
     } as unknown as DataTransfer;
 
     expect(imagePathsFromDrop(data)).toEqual(["/Users/me/a.png"]);
+  });
+
+  it("extracts all paths from uri-list drops", () => {
+    const data = {
+      getData: (type: string) =>
+        type === "text/uri-list"
+          ? "file:///Users/me/a.png\nfile:///Users/me/readme.txt\nfile:///Users/me/folder"
+          : "",
+      files: [],
+    } as unknown as DataTransfer;
+
+    expect(pathsFromDrop(data)).toEqual([
+      "/Users/me/a.png",
+      "/Users/me/readme.txt",
+      "/Users/me/folder",
+    ]);
   });
 
   it("extracts image files when paths are not exposed", () => {

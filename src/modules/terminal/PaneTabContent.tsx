@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import { PaneToolbar } from "./PaneToolbar";
-import { writeToTerminal } from "./lib/terminalBus";
+import { dropPathsIntoTerminal, writeToTerminal } from "./lib/terminalBus";
 import {
   computeLayout,
   computeSplitters,
@@ -53,7 +53,10 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   function handleDrop(content: PaneContent, leafId: string, entry: DraggedEntry) {
     switch (content.kind) {
       case "terminal":
-        writeToTerminal(leafId, `${shellQuotePath(entry.path)} `);
+        setActiveLeaf(tab.id, leafId);
+        if (!dropPathsIntoTerminal(leafId, [entry.path])) {
+          writeToTerminal(leafId, `${shellQuotePath(entry.path)} `);
+        }
         break;
       case "editor":
         if (!entry.isDir) {
