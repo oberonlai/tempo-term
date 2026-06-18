@@ -395,7 +395,7 @@ pub fn parse_refs(decoration: &str) -> Vec<GraphRef> {
                     kind: "tag".to_string(),
                 });
             }
-            // Unknown namespace (refs/notes, stash, ...) — not a deletable branch/tag.
+            // Unknown namespace (refs/notes, ...) — not a deletable branch/tag.
             Some(GraphRef {
                 name: token.to_string(),
                 kind: "unknown".to_string(),

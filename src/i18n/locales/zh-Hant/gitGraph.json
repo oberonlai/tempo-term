@@ -1,7 +1,5 @@
 {
-  "title": "Git 線圖",
   "noRepo": "這個資料夾不是 Git 儲存庫",
-  "commits": "個提交",
   "loadMore": "載入更多",
   "dismiss": "關閉",
   "refHint": "{{name}}，按右鍵開啟選單",

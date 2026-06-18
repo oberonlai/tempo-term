@@ -176,6 +176,21 @@ export function GitGraphTabContent() {
     void reload(repo, next, options);
   }, [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes]);
 
+  // Turning remotes off hides remote branches; if one was selected, fall back
+  // to Show All so the dropdown value and selectedBranch stay in sync.
+  const handleToggleRemotes = useCallback(
+    (value: boolean) => {
+      setIncludeRemotes(value);
+      if (!value) {
+        const current = branches.find((b) => b.name === selectedBranch);
+        if (current?.isRemote) {
+          setSelectedBranch(null);
+        }
+      }
+    },
+    [branches, selectedBranch],
+  );
+
   const handleFetch = useCallback(async () => {
     if (!repo) {
       return;
@@ -190,7 +205,7 @@ export function GitGraphTabContent() {
     } finally {
       setFetching(false);
     }
-  }, [repo, limit, reload, options]);
+  }, [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes]);
 
   const toolbarLabels: GitGraphToolbarLabels = {
     branches: t("toolbar.branches"),
@@ -376,7 +391,7 @@ export function GitGraphTabContent() {
           selectedBranch={selectedBranch}
           onSelectBranch={setSelectedBranch}
           includeRemotes={includeRemotes}
-          onToggleRemotes={setIncludeRemotes}
+          onToggleRemotes={handleToggleRemotes}
           includeTags={includeTags}
           onToggleTags={setIncludeTags}
           includeStashes={includeStashes}

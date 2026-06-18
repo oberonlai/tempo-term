@@ -171,6 +171,7 @@ export function GitGraphToolbar({
               <div
                 className="fixed inset-0 z-20"
                 onClick={() => setOptionsOpen(false)}
+                aria-hidden="true"
               />
               <div className="absolute right-0 z-30 mt-1 w-44 rounded-md border border-border-strong bg-bg-elevated p-1 shadow-lg">
                 <ToggleRow
@@ -225,6 +226,8 @@ function ToggleRow({ label, checked, onChange }: ToggleRowProps) {
   return (
     <button
       type="button"
+      role="checkbox"
+      aria-checked={checked}
       onClick={() => onChange(!checked)}
       className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs text-fg-muted hover:bg-bg-inset hover:text-fg"
     >

@@ -1,7 +1,5 @@
 {
-  "title": "Git Graph",
   "noRepo": "This folder is not a Git repository",
-  "commits": "commits",
   "loadMore": "Load more",
   "dismiss": "Dismiss",
   "refHint": "{{name}} — right-click for options",

@@ -34,11 +34,13 @@ describe("filterCommits", () => {
   it("matches on author", () => {
     const commits = [commit({ author: "Bob" }), commit({ author: "Alice" })];
     expect(filterCommits(commits, "bob")).toHaveLength(1);
+    expect(filterCommits(commits, "bob")[0].author).toBe("Bob");
   });
 
   it("matches on hash", () => {
     const commits = [commit({ hash: "abc1234" }), commit({ hash: "def5678" })];
     expect(filterCommits(commits, "def")).toHaveLength(1);
+    expect(filterCommits(commits, "def")[0].hash).toBe("def5678");
   });
 
   it("returns empty array when nothing matches", () => {
