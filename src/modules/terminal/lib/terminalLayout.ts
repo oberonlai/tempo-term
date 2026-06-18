@@ -222,6 +222,22 @@ export function computeLayout(node: LayoutNode, rect: Rect = FULL): PaneRect[] {
   ];
 }
 
+/**
+ * The id of the pane covering a point given in layout percentages (0–100), or
+ * null if the point is outside every pane. Lets a drop resolve its target from
+ * coordinates alone, without elementFromPoint (unreliable mid-drag in WKWebView).
+ */
+export function paneIdAt(panes: PaneRect[], xPct: number, yPct: number): string | null {
+  const pane = panes.find(
+    (p) =>
+      xPct >= p.rect.left &&
+      xPct <= p.rect.left + p.rect.width &&
+      yPct >= p.rect.top &&
+      yPct <= p.rect.top + p.rect.height,
+  );
+  return pane?.id ?? null;
+}
+
 export interface SplitterInfo {
   /** Matches setSizesById's id, so a drag can target this exact split. */
   id: string;

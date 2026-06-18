@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { cursorPosition } from "@tauri-apps/api/window";
+import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
@@ -15,11 +14,11 @@ import { NoteTabContent } from "@/modules/notes/NoteTabContent";
 import { PreviewTabContent } from "@/modules/preview/PreviewTabContent";
 import { GitGraphTabContent } from "@/modules/git-graph/GitGraphTabContent";
 import { LauncherPanel } from "@/components/LauncherPanel";
-import { dropOverlayClassName, useEntryDragging } from "@/components/EntryDropOverlay";
+import { dropOverlayClassName } from "@/components/EntryDropOverlay";
 import {
   fileUrl,
-  getDraggedEntry,
   shellQuotePath,
+  useEntryDragStore,
   type DraggedEntry,
 } from "@/modules/explorer/lib/dragEntry";
 import { insertLinkIntoNote } from "@/modules/notes/lib/noteBus";
@@ -28,14 +27,6 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const MIN_FRACTION = 0.1;
 const MAX_FRACTION = 0.9;
-
-/** The leaf id of the pane under the given client-space point, if any. */
-function paneLeafAt(clientX: number, clientY: number): string | null {
-  return (
-    document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-pane-leaf]")?.dataset
-      .paneLeaf ?? null
-  );
-}
 
 /**
  * Renders one tab as a recursive split of panes. Each leaf shows a terminal,
@@ -51,7 +42,12 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   const closePane = useTabsStore((s) => s.closePane);
   const isActiveTab = useTabsStore((s) => s.activeId === tab.id);
   const paneAreaRef = useRef<HTMLDivElement>(null);
-  const dragging = useEntryDragging();
+  // Pointer-drag state lives in the explorer drag store (see dragEntry.ts): the
+  // entry being dragged, which pane it's over, and a resolved drop to consume.
+  const dragging = useEntryDragStore((s) => s.dragging);
+  const draggedEntry = useEntryDragStore((s) => s.entry);
+  const hoverLeaf = useEntryDragStore((s) => s.hoverLeafId);
+  const pendingDrop = useEntryDragStore((s) => s.pendingDrop);
   // New terminal panes (incl. splits) start in the explorer's current dir, not
   // the tab's original cwd — so a split follows where you've navigated to.
   const rootPath = useWorkspaceStore((s) => s.rootPath);
@@ -60,13 +56,14 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   const splitters = computeSplitters(tab.paneTree);
   const multiple = panes.length > 1;
 
-  // Single-file panes (editor/preview) reject folders; terminal/note take both.
-  // A launcher pane has nothing to drop onto yet.
+  // Single-file panes reject folders; terminal/note take both. Dropping a file
+  // onto a launcher pane opens it, so a launcher accepts a file too.
   function canDrop(content: PaneContent, entry: DraggedEntry): boolean {
-    if (content.kind === "launcher") {
-      return false;
-    }
-    if (content.kind === "editor" || content.kind === "preview") {
+    if (
+      content.kind === "editor" ||
+      content.kind === "preview" ||
+      content.kind === "launcher"
+    ) {
       return !entry.isDir;
     }
     return true;
@@ -93,6 +90,12 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
           setPaneContent(tab.id, leafId, { kind: "preview", url: fileUrl(entry.path) });
         }
         break;
+      case "launcher":
+        // Drop a file onto a freshly split pane to open it right there.
+        if (!entry.isDir) {
+          setPaneContent(tab.id, leafId, { kind: "editor", path: entry.path });
+        }
+        break;
     }
   }
 
@@ -102,74 +105,22 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   handleDropRef.current = handleDrop;
   const canDropRef = useRef(canDrop);
   canDropRef.current = canDrop;
-  const [hoverLeaf, setHoverLeaf] = useState<string | null>(null);
-  const hoverLeafRef = useRef<string | null>(null);
-  hoverLeafRef.current = hoverLeaf;
-  // CSS-screen position of the webview content's top-left, captured from the
-  // dragstart event (its screenX/clientX are reliable; cursorPosition's screen
-  // origin is not, e.g. on a monitor placed above the main one). Then
-  // client = cursorCss - offset.
-  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  // A pointer drag resolves its drop target into the store; the tab that owns
+  // that pane runs the drop and clears it. Other tabs ignore it (pane not found).
   useEffect(() => {
-    const onDragStart = (event: DragEvent) => {
-      dragOffsetRef.current = {
-        x: event.screenX - event.clientX,
-        y: event.screenY - event.clientY,
-      };
-    };
-    document.addEventListener("dragstart", onDragStart, true);
-    return () => document.removeEventListener("dragstart", onDragStart, true);
-  }, []);
-
-  // WKWebView only fires dragstart/dragend for in-webview element drags — the
-  // intermediate drag/dragover/drop events are swallowed. So we resolve the drop
-  // from the dragend cursor position (capture phase, so we read the dragged
-  // entry before FileTree's own onDragEnd clears it in the bubble phase).
-  useEffect(() => {
-    const onDragEnd = (event: DragEvent) => {
-      const entry = getDraggedEntry();
-      const leaf = paneLeafAt(event.clientX, event.clientY) ?? hoverLeafRef.current;
-      setHoverLeaf(null);
-      if (!entry || !leaf) {
-        return;
-      }
-      const pane = panesRef.current.find((p) => p.id === leaf);
-      if (pane && canDropRef.current(pane.content, entry)) {
-        handleDropRef.current(pane.content, leaf, entry);
-      }
-    };
-    document.addEventListener("dragend", onDragEnd, true);
-    return () => document.removeEventListener("dragend", onDragEnd, true);
-  }, []);
-
-  // No move events fire mid-drag, so poll the OS cursor position to highlight the
-  // pane under the cursor. cursorPosition is physical; divide by devicePixelRatio
-  // for CSS-screen px, then subtract the webview's CSS-screen offset for client px.
-  useEffect(() => {
-    if (!dragging) {
-      setHoverLeaf(null);
+    if (!pendingDrop) {
       return;
     }
-    let active = true;
-    void (async () => {
-      while (active) {
-        try {
-          const cursor = await cursorPosition();
-          const dpr = window.devicePixelRatio || 1;
-          const offset = dragOffsetRef.current;
-          const leaf = paneLeafAt(cursor.x / dpr - offset.x, cursor.y / dpr - offset.y);
-          setHoverLeaf((prev) => (prev === leaf ? prev : leaf));
-        } catch {
-          // ignore a failed read; retry next tick
-        }
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [dragging]);
+    const pane = panesRef.current.find((p) => p.id === pendingDrop.leafId);
+    if (!pane) {
+      return;
+    }
+    if (canDropRef.current(pane.content, pendingDrop.entry)) {
+      handleDropRef.current(pane.content, pendingDrop.leafId, pendingDrop.entry);
+    }
+    useEntryDragStore.getState().clearPendingDrop();
+  }, [pendingDrop]);
 
   function startDrag(e: ReactMouseEvent, splitter: SplitterInfo) {
     e.preventDefault();
@@ -211,7 +162,6 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
       <div ref={paneAreaRef} className="relative min-h-0 flex-1">
         {panes.map((pane) => {
           const active = pane.id === tab.activeLeafId;
-          const draggedEntry = dragging ? getDraggedEntry() : null;
           const dropOk = draggedEntry ? canDrop(pane.content, draggedEntry) : false;
           return (
             <div
@@ -225,9 +175,7 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
                 width: `${pane.rect.width}%`,
                 height: `${pane.rect.height}%`,
               }}
-              className={`p-1 ${multiple ? "border border-border" : ""} ${
-                active && multiple ? "border-accent" : ""
-              }`}
+              className={`p-1 ${multiple ? "border border-border" : ""}`}
             >
               {multiple && (
                 <button

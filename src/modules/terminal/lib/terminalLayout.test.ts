@@ -5,6 +5,7 @@ import {
   firstLeafId,
   leaf,
   leafIds,
+  paneIdAt,
   removeLeaf,
   setSizesById,
   splitId,
@@ -98,6 +99,20 @@ describe("computeLayout", () => {
     const panes = computeLayout(tree);
     expect(panes[0].rect.width).toBeCloseTo(70);
     expect(panes[1].rect.left).toBeCloseTo(70);
+  });
+});
+
+describe("paneIdAt", () => {
+  const panes = computeLayout(splitLeaf(leaf("a"), "a", "row", "b"));
+
+  it("finds the pane covering a percentage point", () => {
+    expect(paneIdAt(panes, 25, 50)).toBe("a");
+    expect(paneIdAt(panes, 75, 50)).toBe("b");
+  });
+
+  it("returns null when the point falls outside every pane", () => {
+    expect(paneIdAt(panes, 150, 50)).toBeNull();
+    expect(paneIdAt(panes, 50, -10)).toBeNull();
   });
 });
 

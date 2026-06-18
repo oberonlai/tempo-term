@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fileUrl, markdownLink, shellQuotePath } from "./dragEntry";
+import {
+  consumeDragClick,
+  fileUrl,
+  getDraggedEntry,
+  markdownLink,
+  setDraggedEntry,
+  shellQuotePath,
+} from "./dragEntry";
 
 describe("shellQuotePath", () => {
   it("leaves simple paths unquoted", () => {
@@ -26,5 +33,22 @@ describe("markdownLink", () => {
 describe("fileUrl", () => {
   it("prefixes file://", () => {
     expect(fileUrl("/x/index.html")).toBe("file:///x/index.html");
+  });
+});
+
+describe("getDraggedEntry / setDraggedEntry", () => {
+  it("round-trips the dragged entry and clears to null", () => {
+    expect(getDraggedEntry()).toBeNull();
+    const entry = { path: "/a/b.ts", name: "b.ts", isDir: false };
+    setDraggedEntry(entry);
+    expect(getDraggedEntry()).toEqual(entry);
+    setDraggedEntry(null);
+    expect(getDraggedEntry()).toBeNull();
+  });
+});
+
+describe("consumeDragClick", () => {
+  it("is false when no drag has just finished", () => {
+    expect(consumeDragClick()).toBe(false);
   });
 });

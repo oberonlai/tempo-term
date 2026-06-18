@@ -23,7 +23,7 @@ import {
   type DirEntry,
 } from "./lib/fsBridge";
 import { dirname, joinPath, relativePath } from "./lib/paths";
-import { setDraggedEntry } from "./lib/dragEntry";
+import { beginEntryDrag, consumeDragClick } from "./lib/dragEntry";
 import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { useTabsStore } from "@/stores/tabsStore";
 import { computeLayout } from "@/modules/terminal/lib/terminalLayout";
@@ -229,19 +229,25 @@ function TreeNode({ entry, depth, onReloadParent }: TreeNodeProps) {
 
   return (
     <li>
-      {/* draggable lives on the wrapper, not the button: WebKit suppresses
-          :hover on draggable elements, which killed the row hover style. */}
+      {/* Pointer-based drag (not HTML5) so Tauri's native drag interception
+          doesn't break hover/drop coordinates; the row swallows the click that
+          trails a completed drag so it doesn't also open/expand the entry. */}
       <div
-        draggable
-        onDragStart={(event) => {
-          setDraggedEntry({ path: entry.path, name: entry.name, isDir: entry.is_dir });
-          event.dataTransfer.effectAllowed = "copy";
-        }}
-        onDragEnd={() => setDraggedEntry(null)}
+        onPointerDown={(event) =>
+          beginEntryDrag(
+            { path: entry.path, name: entry.name, isDir: entry.is_dir },
+            event,
+          )
+        }
       >
         <button
           type="button"
-          onClick={() => void toggle()}
+          onClick={() => {
+            if (consumeDragClick()) {
+              return;
+            }
+            void toggle();
+          }}
           onContextMenu={(event) => {
             event.preventDefault();
             setMenu({ x: event.clientX, y: event.clientY });
