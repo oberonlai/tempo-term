@@ -3,9 +3,9 @@ import { persist } from "zustand/middleware";
 import { uid } from "@/lib/id";
 
 /**
- * A global, persistent notes library (Warp Drive's notebooks, simplified): the
- * user can jot markdown notes any time, organised into folders. Stored locally
- * so it survives restarts and is independent of the open workspace.
+ * A global, persistent notes library: the user can jot markdown notes any time,
+ * organised into folders. Stored locally so it survives restarts and is
+ * independent of the open workspace.
  */
 export interface NoteFolder {
   id: string;
@@ -31,8 +31,15 @@ interface NotesState {
   deleteNote: (id: string) => void;
   /** Move a note into a folder (or to the root when folderId is null). */
   moveNote: (id: string, folderId: string | null) => void;
-  /** Reorder: place `draggedId` just before `targetId`, adopting its folder. */
-  reorderNote: (draggedId: string, targetId: string) => void;
+  /**
+   * Reorder: place `draggedId` just before (default) or after `targetId`,
+   * adopting its folder.
+   */
+  reorderNote: (
+    draggedId: string,
+    targetId: string,
+    position?: "before" | "after",
+  ) => void;
   noteById: (id: string) => Note | undefined;
 }
 
@@ -99,7 +106,7 @@ export const useNotesStore = create<NotesState>()(
           notes: state.notes.map((n) => (n.id === id ? { ...n, folderId } : n)),
         })),
 
-      reorderNote: (draggedId, targetId) =>
+      reorderNote: (draggedId, targetId, position = "before") =>
         set((state) => {
           if (draggedId === targetId) {
             return state;
@@ -111,9 +118,10 @@ export const useNotesStore = create<NotesState>()(
           }
           const without = state.notes.filter((n) => n.id !== draggedId);
           const targetIndex = without.findIndex((n) => n.id === targetId);
+          const insertAt = position === "after" ? targetIndex + 1 : targetIndex;
           const moved = { ...dragged, folderId: target.folderId };
           const next = [...without];
-          next.splice(targetIndex, 0, moved);
+          next.splice(insertAt, 0, moved);
           return { notes: next };
         }),
 

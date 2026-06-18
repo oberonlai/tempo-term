@@ -11,44 +11,38 @@ import {
 } from "lucide-react";
 import { useNotesStore, type Note } from "@/stores/notesStore";
 import { useTabsStore } from "@/stores/tabsStore";
-
-// Tracks the note being dragged (dataTransfer is unreliable in the webview).
-let draggedNoteId: string | null = null;
+import { beginNoteDrag, consumeNoteDragClick, useNoteDragStore } from "./lib/noteDrag";
 
 function NoteRow({ note, depth }: { note: Note; depth: number }) {
   const { t } = useTranslation("notes");
   const openNoteTab = useTabsStore((s) => s.openNoteTab);
   const deleteNote = useNotesStore((s) => s.deleteNote);
-  const reorderNote = useNotesStore((s) => s.reorderNote);
-  const [over, setOver] = useState(false);
+  // While a drag hovers this row, show an insertion line on the matching edge.
+  const edge = useNoteDragStore((s) =>
+    s.hover?.kind === "note" && s.hover.noteId === note.id ? s.hover.position : null,
+  );
 
   return (
     <li
-      draggable
-      onDragStart={(e) => {
-        draggedNoteId = note.id;
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", note.id);
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (draggedNoteId && draggedNoteId !== note.id) setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setOver(false);
-        if (draggedNoteId && draggedNoteId !== note.id) {
-          reorderNote(draggedNoteId, note.id);
-        }
-        draggedNoteId = null;
-      }}
-      className={`group flex items-center ${over ? "border-t-2 border-accent" : ""}`}
+      data-note-id={note.id}
+      onPointerDown={(e) => beginNoteDrag(note.id, note.title || "Untitled", e)}
+      className={`group flex items-center ${
+        edge === "before"
+          ? "border-t-2 border-accent"
+          : edge === "after"
+            ? "border-b-2 border-accent"
+            : ""
+      }`}
     >
       <button
         type="button"
-        onClick={() => openNoteTab(note.id, note.title)}
+        onClick={() => {
+          // Swallow the click that trails a completed drag so it doesn't open.
+          if (consumeNoteDragClick()) {
+            return;
+          }
+          openNoteTab(note.id, note.title);
+        }}
         style={{ paddingLeft: depth * 12 + 10 }}
         className="flex min-w-0 flex-1 items-center gap-2 py-1 pr-2 text-left text-sm text-fg-muted hover:text-fg"
       >
@@ -75,13 +69,15 @@ export function NotesSidebar() {
   const createFolder = useNotesStore((s) => s.createFolder);
   const deleteFolder = useNotesStore((s) => s.deleteFolder);
   const renameFolder = useNotesStore((s) => s.renameFolder);
-  const moveNote = useNotesStore((s) => s.moveNote);
   const openNoteTab = useTabsStore((s) => s.openNoteTab);
+  // Folder the current drag is hovering over, for the drop highlight.
+  const overFolderId = useNoteDragStore((s) =>
+    s.hover?.kind === "folder" ? s.hover.folderId : null,
+  );
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [overFolder, setOverFolder] = useState<string | null>(null);
 
   const rootNotes = notes.filter((n) => n.folderId === null);
 
@@ -125,18 +121,8 @@ export function NotesSidebar() {
         </div>
       </div>
 
-      {/* Root drop zone moves a dragged note out of any folder */}
-      <div
-        className="min-h-0 flex-1 overflow-y-auto py-1"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (draggedNoteId) {
-            moveNote(draggedNoteId, null);
-            draggedNoteId = null;
-          }
-        }}
-      >
+      {/* Dropping on empty space here moves a dragged note out to the root. */}
+      <div data-notes-root="" className="min-h-0 flex-1 overflow-y-auto py-1">
         {folders.length === 0 && notes.length === 0 && (
           <p className="px-3 py-2 text-xs text-fg-subtle">{t("empty")}</p>
         )}
@@ -148,22 +134,9 @@ export function NotesSidebar() {
             return (
               <li key={folder.id}>
                 <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    if (draggedNoteId) setOverFolder(folder.id);
-                  }}
-                  onDragLeave={() => setOverFolder(null)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setOverFolder(null);
-                    if (draggedNoteId) {
-                      moveNote(draggedNoteId, folder.id);
-                      draggedNoteId = null;
-                    }
-                  }}
+                  data-folder-id={folder.id}
                   className={`group flex items-center ${
-                    overFolder === folder.id ? "bg-accent/15" : ""
+                    overFolderId === folder.id ? "bg-accent/15" : ""
                   }`}
                 >
                   <button

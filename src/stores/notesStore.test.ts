@@ -68,4 +68,12 @@ describe("notesStore", () => {
     expect(ids.indexOf(b)).toBeLessThan(ids.indexOf(a));
     expect(useNotesStore.getState().noteById(b)?.folderId).toBe(folder);
   });
+
+  it("reorders a note after another when position is 'after'", () => {
+    const a = useNotesStore.getState().createNote(); // root, order: [a]
+    const b = useNotesStore.getState().createNote(); // root, order: [a, b]
+    useNotesStore.getState().reorderNote(a, b, "after"); // drop a after b → [b, a]
+    const ids = useNotesStore.getState().notes.map((n) => n.id);
+    expect(ids.indexOf(a)).toBeGreaterThan(ids.indexOf(b));
+  });
 });
