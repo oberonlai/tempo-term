@@ -5,7 +5,7 @@
   "deleteNote": "刪除筆記",
   "deleteFolder": "刪除資料夾",
   "renameFolderHint": "雙擊可重新命名",
-  "empty": "還沒有筆記,隨時都能記點東西",
+  "empty": "跨專案保存的全域筆記，隨時記錄，隨時保存",
   "notFound": "這則筆記已經不存在",
   "titlePlaceholder": "筆記標題",
   "contentPlaceholder": "寫任何東西,指令、片段、想法都行⋯(支援 Markdown)",

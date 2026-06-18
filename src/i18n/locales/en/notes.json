@@ -5,7 +5,7 @@
   "deleteNote": "Delete note",
   "deleteFolder": "Delete folder",
   "renameFolderHint": "Double-click to rename",
-  "empty": "No notes yet. Jot something down anytime.",
+  "empty": "Global notes that persist across projects — write anytime, saved anytime.",
   "notFound": "This note no longer exists",
   "titlePlaceholder": "Note title",
   "contentPlaceholder": "Write anything — commands, snippets, ideas…  (Markdown supported)",
