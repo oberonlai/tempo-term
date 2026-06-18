@@ -24,6 +24,7 @@ import {
 } from "@/modules/explorer/lib/dragEntry";
 import { insertLinkIntoNote } from "@/modules/notes/lib/noteBus";
 import { useTabsStore, type Tab } from "@/stores/tabsStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const MIN_FRACTION = 0.1;
 const MAX_FRACTION = 0.9;
@@ -51,6 +52,9 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   const isActiveTab = useTabsStore((s) => s.activeId === tab.id);
   const paneAreaRef = useRef<HTMLDivElement>(null);
   const dragging = useEntryDragging();
+  // New terminal panes (incl. splits) start in the explorer's current dir, not
+  // the tab's original cwd — so a split follows where you've navigated to.
+  const rootPath = useWorkspaceStore((s) => s.rootPath);
 
   const panes = computeLayout(tab.paneTree);
   const splitters = computeSplitters(tab.paneTree);
@@ -251,7 +255,7 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
                 <TerminalView
                   active={active}
                   cwdTracking={active && isActiveTab}
-                  cwd={tab.cwd}
+                  cwd={rootPath ?? tab.cwd}
                   leafId={pane.id}
                   onExit={() => closePane(tab.id, pane.id)}
                   onOpenFile={(absolutePath) =>
