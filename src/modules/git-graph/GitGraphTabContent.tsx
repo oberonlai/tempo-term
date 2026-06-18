@@ -248,6 +248,13 @@ export function GitGraphTabContent() {
     noDiff: t("details.noDiff"),
     noFileSelected: t("details.noFileSelected"),
     close: t("details.close"),
+    diffTab: t("details.diffTab"),
+    aiTab: t("details.aiTab"),
+    aiGenerate: t("details.aiGenerate"),
+    aiExplaining: t("details.aiExplaining"),
+    aiRegenerate: t("details.aiRegenerate"),
+    aiNeedKey: t("details.aiNeedKey"),
+    aiEmpty: t("details.aiEmpty"),
   };
 
   // Build the right-click menu for a commit node.

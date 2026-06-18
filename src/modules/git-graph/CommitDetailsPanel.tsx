@@ -13,6 +13,13 @@ export interface CommitDetailsLabels {
   noDiff: string;
   noFileSelected: string;
   close: string;
+  diffTab: string;
+  aiTab: string;
+  aiGenerate: string;
+  aiExplaining: string;
+  aiRegenerate: string;
+  aiNeedKey: string;
+  aiEmpty: string;
 }
 
 interface CommitDetailsPanelProps {

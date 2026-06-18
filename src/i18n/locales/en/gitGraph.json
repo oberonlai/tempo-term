@@ -29,7 +29,14 @@
     "noChanges": "This commit has no changes to show",
     "noDiff": "No diff to display",
     "noFileSelected": "Select a file to see its diff",
-    "close": "Close"
+    "close": "Close",
+    "diffTab": "Diff",
+    "aiTab": "AI Explain",
+    "aiGenerate": "Explain this diff",
+    "aiExplaining": "Analyzing…",
+    "aiRegenerate": "Regenerate",
+    "aiNeedKey": "No API key set. Add one in settings and try again.",
+    "aiEmpty": "Nothing to explain"
   },
   "menu": {
     "createBranchHere": "Create branch here…",
