@@ -115,17 +115,22 @@ export function TerminalView({
         return;
       }
       // Text wins, so read it first and skip the (costlier) path/image probes
-      // when a normal copy is on the clipboard.
+      // when a normal copy is on the clipboard. Each probe spawns a macOS
+      // helper (osascript/ps), so fetch them lazily and in order: file paths
+      // shadow images in resolvePasteAction, and the foreground command only
+      // matters when there is exactly one path that could be an attachment.
       const clipboardText = await terminalClipboardText().catch(() => "");
       let filePaths: string[] = [];
       let imagePaths: string[] = [];
       let command: string | null = null;
       if (!clipboardText) {
-        [command, filePaths, imagePaths] = await Promise.all([
-          session.foregroundCommand().catch(() => null),
-          terminalClipboardPaths().catch(() => []),
-          terminalClipboardImagePaths().catch(() => []),
-        ]);
+        filePaths = await terminalClipboardPaths().catch(() => []);
+        if (filePaths.length === 0) {
+          imagePaths = await terminalClipboardImagePaths().catch(() => []);
+        }
+        if (filePaths.length === 1 || imagePaths.length === 1) {
+          command = await session.foregroundCommand().catch(() => null);
+        }
       }
       const action = resolvePasteAction({
         shortcut: kind,
