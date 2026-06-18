@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Branch, GraphLog, GraphOptions } from "../types";
+import type { Branch, CommitDetails, GraphLog, GraphOptions } from "../types";
 
 /** Read the commit DAG for the graph view, filtered by display options. */
 export function gitGraphLog(
@@ -81,4 +81,18 @@ export function gitReset(
   mode?: "soft" | "hard",
 ): Promise<void> {
   return invoke("git_reset", { repoPath, commit, mode });
+}
+
+/** Read a commit's full message and changed files. */
+export function gitCommitDetails(repoPath: string, commit: string): Promise<CommitDetails> {
+  return invoke<CommitDetails>("git_commit_details", { repoPath, commit });
+}
+
+/** Read a single file's diff within a commit (against its first parent). */
+export function gitCommitFileDiff(
+  repoPath: string,
+  commit: string,
+  file: string,
+): Promise<string> {
+  return invoke<string>("git_commit_file_diff", { repoPath, commit, file });
 }

@@ -35,3 +35,21 @@ export interface GraphOptions {
   includeTags: boolean;
   includeStashes: boolean;
 }
+
+/** One file changed by a commit. */
+export interface CommitFileChange {
+  status: string;
+  path: string;
+}
+
+/** A commit's full message plus its changed files. */
+export interface CommitDetails {
+  message: string;
+  files: CommitFileChange[];
+}
+
+/** One parsed line of a unified diff for rendering. */
+export interface DiffLine {
+  kind: "file" | "hunk" | "add" | "del" | "context" | "meta";
+  text: string;
+}
