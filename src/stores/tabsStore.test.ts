@@ -36,6 +36,18 @@ describe("tabsStore", () => {
     expect(leafIds(tab.paneTree)).toHaveLength(1);
   });
 
+  it("renames a terminal tab to follow its cwd, unless the user renamed it", () => {
+    const id = useTabsStore.getState().newTerminalTab("/a/proj");
+    expect(activeTab().title).toBe("proj");
+
+    useTabsStore.getState().syncTabTitleToCwd(id, "/a/other");
+    expect(activeTab().title).toBe("other");
+
+    useTabsStore.getState().setTabTitle(id, "My Tab");
+    useTabsStore.getState().syncTabTitleToCwd(id, "/a/changed");
+    expect(activeTab().title).toBe("My Tab");
+  });
+
   it("opens an editor tab named from the file, deduping by path", () => {
     const first = useTabsStore.getState().openEditorTab("/a/b.ts");
     useTabsStore.getState().newTerminalTab();

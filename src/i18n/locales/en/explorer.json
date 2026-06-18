@@ -13,6 +13,7 @@
   "menu": {
     "open": "Open",
     "reveal": "Reveal in Finder",
+    "openInTerminal": "Open in Terminal",
     "newFile": "New File",
     "newFolder": "New Folder",
     "newFilePlaceholder": "File name",

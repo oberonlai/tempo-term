@@ -13,6 +13,7 @@
   "menu": {
     "open": "開啟",
     "reveal": "在 Finder 中顯示",
+    "openInTerminal": "從終端機開啟",
     "newFile": "新增檔案",
     "newFolder": "新增資料夾",
     "newFilePlaceholder": "檔案名稱",

@@ -42,6 +42,8 @@ export interface Tab {
   activeLeafId: string;
   /** Starting directory for new terminal panes created inside this tab. */
   cwd?: string;
+  /** True once the user renames the tab, so cwd changes stop overwriting it. */
+  renamed?: boolean;
 }
 
 interface TabsState {
@@ -60,6 +62,8 @@ interface TabsState {
   openPreviewTab: (url: string) => string;
   openGitGraphTab: () => string;
   setTabTitle: (id: string, title: string) => void;
+  /** Update a terminal tab's title to follow its cwd, unless the user renamed it. */
+  syncTabTitleToCwd: (id: string, cwd: string) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
   splitActivePane: (direction: SplitDirection) => void;
@@ -351,7 +355,16 @@ export const useTabsStore = create<TabsState>()(
 
   setTabTitle: (id, title) =>
     set((state) => ({
-      tabs: state.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, title, renamed: true } : t)),
+    })),
+
+  syncTabTitleToCwd: (id, cwd) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id && t.kind === "terminal" && !t.renamed
+          ? { ...t, title: basename(cwd) }
+          : t,
+      ),
     })),
 
   closeTab: (id) =>

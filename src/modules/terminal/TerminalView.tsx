@@ -17,9 +17,11 @@ import {
   terminalClipboardPaths,
   terminalClipboardText,
   shouldAttachImage,
+  shellQuotePath,
 } from "./lib/terminalClipboard";
 import { findFilePaths, resolveFilePath } from "./lib/fileLinks";
 import { terminalKeySequence } from "./lib/terminalKeymap";
+import { shouldCdToRoot } from "./lib/cwdSync";
 import { dropOverlayClassName } from "@/components/EntryDropOverlay";
 import { fsHomeDir, fsReadFile } from "@/modules/explorer/lib/fsBridge";
 import { getDraggedEntry } from "@/modules/explorer/lib/dragEntry";
@@ -29,6 +31,7 @@ const IS_MAC =
 import { selectTerminalFontFamily, useFontStore } from "@/stores/fontStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useTabsStore } from "@/stores/tabsStore";
 import { getTheme } from "@/themes/themes";
 
 // The home dir never changes within a session; fetch it once and share it so
@@ -354,6 +357,12 @@ export function TerminalView({
           registerTerminal(leafIdRef.current, (text) => void session.write(text));
           registerTerminalPathDrop(leafIdRef.current, (paths) => handlePathDrop(paths));
         }
+        // A freshly opened tracking pane drives the explorer to its start dir
+        // right away instead of waiting for the next cwd poll. (Lets "open in
+        // terminal" sync the explorer via the NEW pane, leaving others untouched.)
+        if (cwdTracking && cwdRef.current) {
+          useWorkspaceStore.getState().setRoot(cwdRef.current);
+        }
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -479,9 +488,32 @@ export function TerminalView({
     };
     void poll();
     const timer = setInterval(() => void poll(), 1200);
+    // React to every explorer-root change (from this poll OR from the explorer):
+    // retitle the active tab to the new dir, and if the shell isn't already there
+    // (i.e. the change came from the explorer, not the shell), cd it. Title sync
+    // lives here, not in the poll's block, because an explorer-driven change sets
+    // `last` first, so the poll never sees dir !== last for it.
+    const unsubscribe = useWorkspaceStore.subscribe((state) => {
+      if (cancelled) {
+        return;
+      }
+      const root = state.rootPath;
+      if (!root) {
+        return;
+      }
+      const activeId = useTabsStore.getState().activeId;
+      if (activeId) {
+        useTabsStore.getState().syncTabTitleToCwd(activeId, root);
+      }
+      if (shouldCdToRoot(root, last)) {
+        last = root;
+        void sessionRef.current?.write(`cd ${shellQuotePath(root)}\n`);
+      }
+    });
     return () => {
       cancelled = true;
       clearInterval(timer);
+      unsubscribe();
     };
   }, [cwdTracking]);
 

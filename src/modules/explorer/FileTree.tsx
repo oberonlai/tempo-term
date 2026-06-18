@@ -11,6 +11,7 @@ import {
   FolderOpen,
   FolderPlus,
   MessageSquarePlus,
+  TerminalSquare,
   Trash2,
 } from "lucide-react";
 import {
@@ -165,6 +166,21 @@ function TreeNode({ entry, depth, onReloadParent }: TreeNodeProps) {
       group: 0,
       onSelect: () => void fsReveal(entry.path),
     },
+    ...(entry.is_dir
+      ? [
+          {
+            id: "openInTerminal",
+            label: t("menu.openInTerminal"),
+            icon: TerminalSquare,
+            group: 0,
+            // Just open the new pane in that dir; the new pane's cwd-tracking
+            // drives the explorer. Don't setRoot here — it would cd the old pane.
+            onSelect: () => {
+              useTabsStore.getState().newTerminalTab(entry.path);
+            },
+          } satisfies ContextMenuItem,
+        ]
+      : []),
     {
       id: "newFile",
       label: t("menu.newFile"),
