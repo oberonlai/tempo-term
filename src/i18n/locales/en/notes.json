@@ -16,6 +16,7 @@
   "run": "Run in terminal",
   "language": "Language",
   "exitHint": "Cmd + Enter to exit",
+  "linkHint": "Cmd / Ctrl-click to open",
   "slash": {
     "text": "Text",
     "h1": "Heading 1",

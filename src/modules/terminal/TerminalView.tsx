@@ -1,5 +1,6 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createTerminal, type TerminalHandle } from "./lib/createTerminal";
 import { openPty, type PtySession } from "./lib/pty-bridge";
 import {
@@ -83,6 +84,9 @@ export function TerminalView({
   onExitRef.current = onExit;
   const onOpenFileRef = useRef(onOpenFile);
   onOpenFileRef.current = onOpenFile;
+  const { t } = useTranslation();
+  const linkHintRef = useRef(t("openLinkHint"));
+  linkHintRef.current = t("openLinkHint");
 
   const fontFamily = useFontStore(selectTerminalFontFamily);
   const fontSize = useFontStore((s) => s.fontSize);
@@ -104,6 +108,7 @@ export function TerminalView({
       fontFamily: selectTerminalFontFamily(initial),
       fontSize: initial.fontSize,
       theme: getTheme(useSettingsStore.getState().themeId).terminal,
+      linkHint: linkHintRef.current,
     });
     handleRef.current = handle;
     const { term, fit } = handle;

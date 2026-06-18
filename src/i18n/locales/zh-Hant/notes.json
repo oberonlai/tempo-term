@@ -16,6 +16,7 @@
   "run": "在終端機執行",
   "language": "語言",
   "exitHint": "Cmd + Enter 跳脫",
+  "linkHint": "Cmd / Ctrl + 點擊開啟連結",
   "slash": {
     "text": "文字",
     "h1": "標題 1",

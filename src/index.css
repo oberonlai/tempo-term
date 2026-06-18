@@ -124,7 +124,43 @@ button:disabled {
 .note-md ol { list-style: decimal; padding-left: 1.4em; margin: 0.5em 0; }
 .note-md li { margin: 0.2em 0; }
 .note-md li > input[type="checkbox"] { margin-right: 0.4em; }
-.note-md a { color: var(--color-accent); text-decoration: underline; }
+.note-md a { color: var(--color-accent); text-decoration: underline; cursor: pointer; }
+/* Shared hover tooltip for terminal links (xterm has no native tooltip). */
+.terminal-link-tooltip {
+  position: fixed;
+  z-index: 9999;
+  display: none;
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-fg);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  padding: 2px 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Instant hover hint for editor links (native title is too slow to be useful). */
+.tiptap a[data-link-hint] { position: relative; }
+.tiptap a[data-link-hint]:hover::after {
+  content: attr(data-link-hint);
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 50;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-fg);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  padding: 2px 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
 .note-md strong { font-weight: 700; }
 .note-md em { font-style: italic; }
 .note-md blockquote {
@@ -151,7 +187,10 @@ button:disabled {
   border-radius: 4px;
   padding: 0.1em 0.35em;
 }
-.note-md pre {
+/* Static markdown (AI replies, chat) needs the boxed code block. The notes
+   editor renders code blocks through a React node view that draws its own
+   container, so scope this off the editor (.tiptap) to avoid a double box. */
+.note-md:not(.tiptap) pre {
   background: var(--color-bg-inset);
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -165,6 +204,23 @@ button:disabled {
   background: none;
   border: 0;
   padding: 0;
+}
+/* In the editor the code block already sets its own size on <pre>; don't shrink
+   the code further, so it stays in step with the language selector beside it. */
+.note-md.tiptap pre code {
+  font-size: 1em;
+}
+
+/* The Combobox popup is a <ul>; when it renders inside note content it must not
+   inherit the prose list styling (bullets, left indent, per-item margins),
+   which would push the option highlight off the left edge and add gaps. */
+.note-md ul[data-combobox] {
+  list-style: none;
+  margin: 0;
+  padding-left: 0.25rem;
+}
+.note-md ul[data-combobox] li {
+  margin: 0;
 }
 
 /* In chat bubbles, trim the leading/trailing block margins */

@@ -2,7 +2,10 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { buildTerminalFontFamily } from "@/modules/fonts/lib/fontChain";
+import { isWebUrl } from "@/lib/url";
+import { hideLinkTooltip, showLinkTooltip } from "./linkTooltip";
 import "@xterm/xterm/css/xterm.css";
 
 /**
@@ -22,6 +25,8 @@ export interface CreateTerminalOptions {
   fontFamily?: string;
   fontSize?: number;
   theme?: ITheme;
+  /** Hover hint shown over web links (e.g. "Cmd / Ctrl-click to open"). */
+  linkHint?: string;
 }
 
 export function createTerminal(options: CreateTerminalOptions = {}): TerminalHandle {
@@ -41,7 +46,26 @@ export function createTerminal(options: CreateTerminalOptions = {}): TerminalHan
 
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon());
+  // Open web links in the system browser (not the in-app webview) on a
+  // modifier-click, matching the file-link gesture (Alt/Cmd) plus Ctrl for
+  // non-mac. A plain click is left for text selection. Hover shows a hint.
+  term.loadAddon(
+    new WebLinksAddon(
+      (event, uri) => {
+        if ((event.metaKey || event.ctrlKey || event.altKey) && isWebUrl(uri)) {
+          void openUrl(uri);
+        }
+      },
+      {
+        hover: (event) => {
+          if (options.linkHint) {
+            showLinkTooltip(options.linkHint, event.clientX, event.clientY);
+          }
+        },
+        leave: () => hideLinkTooltip(),
+      },
+    ),
+  );
 
   const unicode11 = new Unicode11Addon();
   term.loadAddon(unicode11);

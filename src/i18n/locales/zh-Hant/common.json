@@ -1,6 +1,7 @@
 {
   "appName": "TempoTerm",
   "tagline": "AI 驅動的終端機工作區",
+  "openLinkHint": "Cmd / Ctrl + 點擊開啟",
   "nav": {
     "terminal": "終端機",
     "explorer": "檔案總管",
