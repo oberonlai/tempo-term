@@ -49,17 +49,17 @@
 
   /* Semantic tokens mapped onto the Vitesse palette */
   --color-bg: #222222;
-  --color-bg-elevated: #2a2a2a;
-  --color-bg-inset: #1b1b1b;
-  --color-border: #363636;
-  --color-border-strong: #414141;
+  --color-bg-elevated: #292929;
+  --color-bg-inset: #222222;
+  --color-border: #333333;
+  --color-border-strong: #454545;
   --color-fg: #dbd7ca;
-  --color-fg-muted: #b3b0a3;
+  --color-fg-muted: #bfbaaa;
   --color-fg-subtle: #85827b;
   --color-accent: #5eaab5;
   --color-accent-hover: #6fb8c2;
   --color-success: #4d9375;
-  --color-warning: #dbbd63;
+  --color-warning: #e6cc77;
   --color-danger: #cb7676;
 
   --font-sans: "Inter", system-ui, "PingFang TC", "Noto Sans TC", sans-serif;
