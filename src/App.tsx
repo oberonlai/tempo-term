@@ -9,7 +9,6 @@ import { TabsArea } from "@/components/TabsArea";
 import { useUiStore } from "@/stores/uiStore";
 import { useUpdaterStore } from "@/stores/updaterStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { useFontStore } from "@/stores/fontStore";
 import { useTabsStore } from "@/stores/tabsStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { applyTheme, getTheme } from "@/themes/themes";
@@ -23,7 +22,6 @@ function clamp(value: number, min: number, max: number): number {
 
 function App() {
   const themeId = useSettingsStore((s) => s.themeId);
-  const loadFontReport = useFontStore((s) => s.loadReport);
   const sidebarVisible = useUiStore((s) => s.sidebarVisible);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const [sidebarWidth, setSidebarWidth] = useState(260);
@@ -32,9 +30,9 @@ function App() {
     applyTheme(getTheme(themeId), document.documentElement);
   }, [themeId]);
 
-  useEffect(() => {
-    void loadFontReport();
-  }, [loadFontReport]);
+  // The font report (enumerating every installed family) is loaded lazily by
+  // the Fonts settings section when it opens, not at startup — the terminal's
+  // default font chain already covers CJK, so a cold launch does no font work.
 
   // Quietly check for a new release a few seconds after launch; the prompt only
   // appears if one actually exists, so a normal start stays uninterrupted.
