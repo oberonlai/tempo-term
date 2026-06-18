@@ -12,6 +12,7 @@ import { imageFilesFromDrop, pathsFromDrop } from "./lib/terminalDrop";
 import {
   formatPathsForTerminal,
   prepareClipboardImageAttachment,
+  resolvePasteAction,
   saveDroppedImage,
   terminalClipboardImagePaths,
   terminalClipboardPaths,
@@ -113,37 +114,43 @@ export function TerminalView({
       if (!session) {
         return;
       }
-      const [command, clipboardPaths] = await Promise.all([
-        session.foregroundCommand().catch(() => null),
-        terminalClipboardPaths().catch(() => []),
-      ]);
-      if (clipboardPaths.length > 0) {
-        if (shouldAttachImage(command, clipboardPaths)) {
-          await prepareClipboardImageAttachment(clipboardPaths[0]).catch(() => {});
+      // Text wins, so read it first and skip the (costlier) path/image probes
+      // when a normal copy is on the clipboard.
+      const clipboardText = await terminalClipboardText().catch(() => "");
+      let filePaths: string[] = [];
+      let imagePaths: string[] = [];
+      let command: string | null = null;
+      if (!clipboardText) {
+        [command, filePaths, imagePaths] = await Promise.all([
+          session.foregroundCommand().catch(() => null),
+          terminalClipboardPaths().catch(() => []),
+          terminalClipboardImagePaths().catch(() => []),
+        ]);
+      }
+      const action = resolvePasteAction({
+        shortcut: kind,
+        clipboardText,
+        filePaths,
+        imagePaths,
+        foregroundCommand: command,
+      });
+      switch (action.kind) {
+        case "text":
+          term.paste(action.text);
+          break;
+        case "attach-image":
+          await prepareClipboardImageAttachment(action.path).catch(() => {});
           await session.write("\x16");
-        } else {
-          term.paste(formatPathsForTerminal(clipboardPaths));
-        }
-        return;
-      }
-      const imagePaths = await terminalClipboardImagePaths().catch(() => []);
-      if (imagePaths.length > 0) {
-        if (shouldAttachImage(command, imagePaths)) {
-          await prepareClipboardImageAttachment(imagePaths[0]).catch(() => {});
+          break;
+        case "paste-paths":
+          term.paste(formatPathsForTerminal(action.paths));
+          break;
+        case "control":
           await session.write("\x16");
-        } else {
-          term.paste(formatPathsForTerminal(imagePaths));
-        }
-        return;
+          break;
+        case "none":
+          break;
       }
-      if (kind === "cmd") {
-        const text = await terminalClipboardText().catch(() => "");
-        if (text) {
-          term.paste(text);
-        }
-        return;
-      }
-      await session.write("\x16");
     }
 
     function isTerminalPasteShortcut(event: KeyboardEvent): "ctrl" | "cmd" | null {

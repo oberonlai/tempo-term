@@ -4,6 +4,7 @@ import {
   formatPathsForTerminal,
   isImageAttachmentCli,
   isImagePath,
+  resolvePasteAction,
   shellQuotePath,
   shouldAttachImage,
 } from "./terminalClipboard";
@@ -45,5 +46,61 @@ describe("terminal clipboard helpers", () => {
   it("shell-quotes paths only when needed", () => {
     expect(shellQuotePath("/tmp/a.png")).toBe("/tmp/a.png");
     expect(shellQuotePath("/tmp/it's here.png")).toBe("'/tmp/it'\\''s here.png'");
+  });
+});
+
+describe("resolvePasteAction", () => {
+  it("pastes clipboard text verbatim, even when it looks like a path", () => {
+    expect(
+      resolvePasteAction({
+        shortcut: "cmd",
+        clipboardText: "/usr/local/bin",
+        filePaths: [],
+        imagePaths: [],
+        foregroundCommand: "zsh",
+      }),
+    ).toEqual({ kind: "text", text: "/usr/local/bin" });
+  });
+
+  it("pastes a copied file's path when the clipboard has no text", () => {
+    expect(
+      resolvePasteAction({
+        shortcut: "cmd",
+        clipboardText: "",
+        filePaths: ["/Users/me/My File.txt"],
+        imagePaths: [],
+        foregroundCommand: "zsh",
+      }),
+    ).toEqual({ kind: "paste-paths", paths: ["/Users/me/My File.txt"] });
+  });
+
+  it("attaches a copied image when the foreground command is an image-aware CLI", () => {
+    expect(
+      resolvePasteAction({
+        shortcut: "cmd",
+        clipboardText: "",
+        filePaths: [],
+        imagePaths: ["/tmp/shot.png"],
+        foregroundCommand: "claude",
+      }),
+    ).toEqual({ kind: "attach-image", path: "/tmp/shot.png" });
+  });
+
+  it("pastes the image path instead of attaching when the shell is not image-aware", () => {
+    expect(
+      resolvePasteAction({
+        shortcut: "cmd",
+        clipboardText: "",
+        filePaths: [],
+        imagePaths: ["/tmp/shot.png"],
+        foregroundCommand: "zsh",
+      }),
+    ).toEqual({ kind: "paste-paths", paths: ["/tmp/shot.png"] });
+  });
+
+  it("falls back to the control byte for Ctrl+V with an empty clipboard", () => {
+    const base = { clipboardText: "", filePaths: [], imagePaths: [], foregroundCommand: null };
+    expect(resolvePasteAction({ ...base, shortcut: "ctrl" })).toEqual({ kind: "control" });
+    expect(resolvePasteAction({ ...base, shortcut: "cmd" })).toEqual({ kind: "none" });
   });
 });

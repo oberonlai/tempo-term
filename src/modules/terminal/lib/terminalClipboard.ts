@@ -55,3 +55,48 @@ export function shellQuotePath(path: string): string {
   }
   return `'${path.replace(/'/g, "'\\''")}'`;
 }
+
+export type PasteAction =
+  | { kind: "text"; text: string }
+  | { kind: "attach-image"; path: string }
+  | { kind: "paste-paths"; paths: string[] }
+  | { kind: "control" }
+  | { kind: "none" };
+
+interface PasteInput {
+  shortcut: "ctrl" | "cmd";
+  clipboardText: string;
+  filePaths: string[];
+  imagePaths: string[];
+  foregroundCommand: string | null;
+}
+
+/**
+ * Decide what a terminal paste should do, in priority order:
+ *
+ * 1. Clipboard text wins and is pasted verbatim — no path detection, no shell
+ *    quoting — so an ordinary copy (or a path-looking string) lands exactly as
+ *    copied. This ordering is what keeps plain text from being mis-quoted.
+ * 2. With no text, a copied image handed to an image-aware CLI is attached.
+ * 3. Otherwise a genuine file reference (or a screenshot's temp path) is pasted
+ *    as a shell-quoted path.
+ * 4. A bare Ctrl+V with nothing to paste falls back to the raw control byte.
+ */
+export function resolvePasteAction(input: PasteInput): PasteAction {
+  if (input.clipboardText) {
+    return { kind: "text", text: input.clipboardText };
+  }
+  if (shouldAttachImage(input.foregroundCommand, input.filePaths)) {
+    return { kind: "attach-image", path: input.filePaths[0] };
+  }
+  if (shouldAttachImage(input.foregroundCommand, input.imagePaths)) {
+    return { kind: "attach-image", path: input.imagePaths[0] };
+  }
+  if (input.filePaths.length > 0) {
+    return { kind: "paste-paths", paths: input.filePaths };
+  }
+  if (input.imagePaths.length > 0) {
+    return { kind: "paste-paths", paths: input.imagePaths };
+  }
+  return input.shortcut === "ctrl" ? { kind: "control" } : { kind: "none" };
+}
