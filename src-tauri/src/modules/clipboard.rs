@@ -160,7 +160,7 @@ return resultText
     Ok(output
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .filter(|line| is_valid_clipboard_file_path(line))
         .map(ToOwned::to_owned)
         .collect())
 }
@@ -273,6 +273,13 @@ fn image_extension(name: Option<&str>, mime: Option<&str>, bytes: &[u8]) -> Opti
         .map(|ext| if ext == "jpeg" { "jpg" } else { ext })
 }
 
+fn is_valid_clipboard_file_path(path: &str) -> bool {
+    // APFS/HFS+ filenames cannot contain ':', which is the HFS path separator.
+    // A path with ':' is a sign that AppleScript coerced a URL (e.g. https://...)
+    // through POSIX path conversion and mangled it.
+    path.starts_with('/') && !path.contains(':')
+}
+
 fn unique_paths(paths: Vec<String>) -> Vec<String> {
     let mut unique = Vec::new();
     for path in paths {
@@ -312,7 +319,7 @@ fn applescript_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{image_extension, is_image_path, unique_paths};
+    use super::{image_extension, is_image_path, is_valid_clipboard_file_path, unique_paths};
     use std::path::Path;
 
     #[test]
@@ -335,5 +342,32 @@ mod tests {
             unique_paths(vec!["/a".into(), "/b".into(), "/a".into()]),
             vec!["/a".to_string(), "/b".to_string()]
         );
+    }
+
+    #[test]
+    fn rejects_url_derived_clipboard_paths() {
+        // AppleScript coerces https://github.com/mukiwu/tempo-term to
+        // /https/::github.com:mukiwu:tempo-term via HFS↔POSIX path conversion.
+        // Colons are the HFS separator and never appear in valid APFS filenames.
+        assert!(!is_valid_clipboard_file_path(
+            "/https/::github.com:mukiwu:tempo-term"
+        ));
+        assert!(!is_valid_clipboard_file_path("/http/::example.com:foo:bar"));
+    }
+
+    #[test]
+    fn accepts_valid_macos_file_paths() {
+        assert!(is_valid_clipboard_file_path("/Users/foo/bar.txt"));
+        assert!(is_valid_clipboard_file_path("/tmp/image.png"));
+        assert!(is_valid_clipboard_file_path(
+            "/Applications/Xcode.app/Contents/MacOS/Xcode"
+        ));
+    }
+
+    #[test]
+    fn rejects_relative_and_empty_clipboard_paths() {
+        assert!(!is_valid_clipboard_file_path("relative/path.txt"));
+        assert!(!is_valid_clipboard_file_path("./local/file.rs"));
+        assert!(!is_valid_clipboard_file_path(""));
     }
 }
