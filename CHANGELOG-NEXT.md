@@ -1,0 +1,14 @@
+- feat: Git 圖譜大升級，點任一 commit 看變更檔案與 diff，還能讓 AI 解釋這次改了什麼
+  - _Major Git graph upgrade, click any commit to see its changed files and diff, and ask the AI to explain what changed_
+- feat: Git 圖譜加上工具列，支援遠端分支、stash、fetch 與關鍵字搜尋
+  - _Git graph toolbar with remote branches, stashes, fetch and keyword search_
+- feat: 檔案總管與終端機目錄雙向同步，在哪一邊切目錄另一邊都會跟著走
+  - _Two-way directory sync between the file explorer and terminal, cd on either side moves the other_
+- feat: 可從資料夾右鍵開新終端機，也能把檔案、資料夾或圖片拖到終端機和其他面板上使用
+  - _Open a new terminal from a folder's right-click menu, and drag files, folders or images onto the terminal and other panes_
+- feat: 編輯器可切換自動換行
+  - _Toggle word wrap in the editor_
+- feat: 重新設計設定裡的關於頁面，並可手動檢查更新
+  - _Redesigned About page in settings with a manual update check_
+- fix: 終端機改用 login shell 啟動，PATH 會帶到 Homebrew 等工具，修正找不到 gh 之類指令的問題
+  - _Launch the terminal as a login shell so PATH picks up Homebrew tools, fixing missing commands like gh_
