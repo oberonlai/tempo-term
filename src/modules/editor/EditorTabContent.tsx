@@ -6,6 +6,7 @@ import { EditorView as CMView } from "@codemirror/view";
 import { editorSyntaxTheme } from "@/themes/editorTheme";
 import { languageExtension } from "./lib/language";
 import { useEditorStore } from "./store/editorStore";
+import { shouldReloadFromDisk } from "./lib/reload";
 import { fsReadFile, fsWriteFile } from "@/modules/explorer/lib/fsBridge";
 import { basename } from "@/modules/explorer/lib/paths";
 import { MarkdownView } from "@/components/MarkdownView";
@@ -32,7 +33,6 @@ export function EditorTabContent({ path }: { path: string }) {
   const setContent = useEditorStore((s) => s.setContent);
   const markSaved = useEditorStore((s) => s.markSaved);
   const content = useEditorStore((s) => s.buffers[path]?.content ?? "");
-  const loaded = useEditorStore((s) => s.buffers[path] !== undefined);
 
   const fontFamily = useFontStore(selectTerminalFontFamily);
   const fontSize = useFontStore((s) => s.fontSize);
@@ -45,13 +45,15 @@ export function EditorTabContent({ path }: { path: string }) {
   const effectiveMode: EditorMode = isMarkdown ? mode : "edit";
 
   useEffect(() => {
-    if (loaded) {
+    // Re-read from disk whenever the file (re)opens so external edits show up;
+    // skip only when there are unsaved local edits, to avoid clobbering them.
+    if (!shouldReloadFromDisk(useEditorStore.getState().buffers[path])) {
       return;
     }
     fsReadFile(path)
       .then((text) => setBaseline(path, text))
       .catch(() => setBaseline(path, ""));
-  }, [path, loaded, setBaseline]);
+  }, [path, setBaseline]);
 
   const extensions = useMemo(
     () => [
