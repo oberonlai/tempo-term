@@ -211,8 +211,6 @@ export function GitGraphTabContent() {
     branches: t("toolbar.branches"),
     showAll: t("toolbar.showAll"),
     showRemoteBranches: t("toolbar.showRemoteBranches"),
-    localGroup: t("toolbar.localGroup"),
-    remoteGroup: t("toolbar.remoteGroup"),
     search: t("toolbar.search"),
     searchPlaceholder: t("toolbar.searchPlaceholder"),
     displayOptions: t("toolbar.displayOptions"),

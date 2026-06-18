@@ -7,14 +7,13 @@ import {
   Settings2,
   X,
 } from "lucide-react";
+import { Combobox } from "@/components/Combobox";
 import type { Branch } from "./types";
 
 export interface GitGraphToolbarLabels {
   branches: string;
   showAll: string;
   showRemoteBranches: string;
-  localGroup: string;
-  remoteGroup: string;
   search: string;
   searchPlaceholder: string;
   displayOptions: string;
@@ -47,8 +46,6 @@ interface GitGraphToolbarProps {
   labels: GitGraphToolbarLabels;
 }
 
-const SHOW_ALL = "__all__";
-
 export function GitGraphToolbar({
   branches,
   selectedBranch,
@@ -74,38 +71,29 @@ export function GitGraphToolbar({
   const locals = branches.filter((b) => !b.isRemote);
   const remotes = branches.filter((b) => b.isRemote);
 
+  // Combobox takes a flat string list. "Show All" doubles as the sentinel that
+  // maps back to null; remote names already carry their "origin/" prefix so the
+  // two groups stay distinguishable without optgroup headers.
+  const branchOptions = [
+    labels.showAll,
+    ...locals.map((b) => b.name),
+    ...(includeRemotes ? remotes.map((b) => b.name) : []),
+  ];
+
   return (
     <div className="relative flex items-center justify-between gap-3 rounded-lg border border-border bg-bg-inset px-3 py-2">
       {/* 左側：分支下拉 + 遠端開關 */}
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs text-fg-subtle">
+        <div className="flex items-center gap-1.5 text-xs text-fg-subtle">
           <span>{labels.branches}:</span>
-          <select
-            value={selectedBranch ?? SHOW_ALL}
-            onChange={(e) =>
-              onSelectBranch(e.target.value === SHOW_ALL ? null : e.target.value)
-            }
-            className="rounded border border-border-strong bg-bg px-2 py-1 text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent"
-          >
-            <option value={SHOW_ALL}>{labels.showAll}</option>
-            <optgroup label={labels.localGroup}>
-              {locals.map((b) => (
-                <option key={`local:${b.name}`} value={b.name}>
-                  {b.name}
-                </option>
-              ))}
-            </optgroup>
-            {includeRemotes && remotes.length > 0 && (
-              <optgroup label={labels.remoteGroup}>
-                {remotes.map((b) => (
-                  <option key={`remote:${b.name}`} value={b.name}>
-                    {b.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </label>
+          <Combobox
+            value={selectedBranch ?? labels.showAll}
+            options={branchOptions}
+            onChange={(v) => onSelectBranch(v === labels.showAll ? null : v)}
+            ariaLabel={labels.branches}
+            className="w-48"
+          />
+        </div>
 
         <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-fg-muted">
           <input

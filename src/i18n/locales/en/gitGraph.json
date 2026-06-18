@@ -11,8 +11,6 @@
     "branches": "Branches",
     "showAll": "Show All",
     "showRemoteBranches": "Show Remote Branches",
-    "localGroup": "Local",
-    "remoteGroup": "Remote",
     "search": "Search commits",
     "searchPlaceholder": "Search message, author, hash…",
     "displayOptions": "Display options",
