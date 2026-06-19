@@ -118,9 +118,17 @@ fn mangle_cwd(cwd: &str) -> String {
 
 /// The base config directory Claude Code writes transcripts under: the
 /// `CLAUDE_CONFIG_DIR` override when set and non-empty, otherwise `~/.claude`.
+/// A leading `~` in the override is expanded against `home`; shells usually
+/// expand it first, but a literal `~` can still reach us from a config file.
 fn config_base_dir(home: &Path, env_value: Option<&str>) -> PathBuf {
     match env_value {
-        Some(value) if !value.trim().is_empty() => PathBuf::from(value),
+        Some(value) if !value.trim().is_empty() => {
+            let path = Path::new(value);
+            match path.strip_prefix("~") {
+                Ok(rest) => home.join(rest),
+                Err(_) => path.to_path_buf(),
+            }
+        }
         _ => home.join(".claude"),
     }
 }
@@ -455,5 +463,14 @@ mod tests {
         let home = Path::new("/home/u");
         assert_eq!(config_base_dir(home, None), PathBuf::from("/home/u/.claude"));
         assert_eq!(config_base_dir(home, Some("  ")), PathBuf::from("/home/u/.claude"));
+    }
+
+    #[test]
+    fn config_base_dir_expands_a_leading_tilde_against_home() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            config_base_dir(home, Some("~/.claude_custom")),
+            PathBuf::from("/home/u/.claude_custom")
+        );
     }
 }
