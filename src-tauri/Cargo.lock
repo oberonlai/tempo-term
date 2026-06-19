@@ -4674,7 +4674,7 @@ dependencies = [
 
 [[package]]
 name = "tempo-term"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "font-kit",
  "git2",
