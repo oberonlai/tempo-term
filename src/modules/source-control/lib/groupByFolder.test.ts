@@ -29,4 +29,13 @@ describe("groupByFolder", () => {
       "README.md",
     ]);
   });
+
+  it("treats a trailing-slash directory entry as a leaf of its parent folder", () => {
+    // git reports an untracked directory as one entry ending in "/".
+    const groups = groupByFolder([f("a/b/dir/"), f("a/b/file.ts")]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].folder).toBe("a/b");
+    expect(groups[0].files.map((x) => x.path)).toEqual(["a/b/dir/", "a/b/file.ts"]);
+  });
 });

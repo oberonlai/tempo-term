@@ -9,8 +9,11 @@ export interface FolderGroup {
 export function groupByFolder(files: FileStatus[]): FolderGroup[] {
   const map = new Map<string, FileStatus[]>();
   for (const file of files) {
-    const slash = file.path.lastIndexOf("/");
-    const folder = slash === -1 ? "" : file.path.slice(0, slash);
+    // git reports an untracked directory as a single entry ending in "/"; drop
+    // it so the entry buckets under its parent instead of forming its own folder.
+    const normalized = file.path.endsWith("/") ? file.path.slice(0, -1) : file.path;
+    const slash = normalized.lastIndexOf("/");
+    const folder = slash === -1 ? "" : normalized.slice(0, slash);
     const existing = map.get(folder);
     if (existing) {
       existing.push(file);

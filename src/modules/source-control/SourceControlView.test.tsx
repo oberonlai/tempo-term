@@ -74,4 +74,20 @@ describe("SourceControlView folder view", () => {
     });
     expect(gitBridge.gitUnstage).toHaveBeenCalledWith("/repo", "src/b.ts");
   });
+
+  it("labels an untracked directory entry by name in folder view, not a blank row", async () => {
+    vi.mocked(gitBridge.gitStatus).mockResolvedValue({
+      branch: "main",
+      staged: [],
+      unstaged: [{ path: "a/b/dir/", staged: false, status: "?" }],
+    });
+
+    render(<SourceControlView />);
+    await screen.findByText("a/b/dir/"); // flat view shows the full path
+
+    fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
+
+    // Grouped under "a/b", the row keeps a readable "dir/" label.
+    expect(await screen.findByText("dir/")).toBeInTheDocument();
+  });
 });

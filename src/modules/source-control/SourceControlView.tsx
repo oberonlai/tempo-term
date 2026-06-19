@@ -70,7 +70,7 @@ function StatusRow({
         aria-label={actionLabel}
         title={actionLabel}
         onClick={() => onAction(file.path)}
-        className="rounded p-0.5 text-fg-subtle opacity-0 hover:bg-border-strong hover:text-fg group-hover:opacity-100"
+        className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
       >
         <ActionIcon size={14} />
       </button>
@@ -79,7 +79,12 @@ function StatusRow({
 }
 
 function basename(path: string): string {
-  return path.split("/").pop() ?? path;
+  // git reports an untracked directory as a path ending in "/"; keep the slash
+  // in the label so it still reads as a folder instead of a blank name.
+  const isDir = path.endsWith("/");
+  const normalized = isDir ? path.slice(0, -1) : path;
+  const name = normalized.split("/").pop() || normalized;
+  return isDir ? `${name}/` : name;
 }
 
 /**
@@ -140,7 +145,7 @@ function FileList({
                 aria-label={`${folderActionLabel}: ${display}`}
                 title={`${folderActionLabel}: ${display}`}
                 onClick={() => onFolderAction(group.files.map((f) => f.path))}
-                className="rounded p-0.5 text-fg-subtle opacity-0 hover:bg-border-strong hover:text-fg group-hover:opacity-100"
+                className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
               >
                 <FolderActionIcon size={14} />
               </button>
