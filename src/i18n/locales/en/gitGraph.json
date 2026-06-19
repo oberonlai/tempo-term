@@ -20,7 +20,8 @@
     "fetch": "Fetch",
     "fetching": "Fetching…",
     "matches": "{{count}} matches",
-    "head": "HEAD"
+    "head": "HEAD",
+    "more": "More"
   },
   "details": {
     "author": "Author",

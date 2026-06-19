@@ -20,7 +20,8 @@
     "fetch": "抓取遠端",
     "fetching": "抓取中…",
     "matches": "{{count}} 筆符合",
-    "head": "HEAD"
+    "head": "HEAD",
+    "more": "更多"
   },
   "details": {
     "author": "作者",

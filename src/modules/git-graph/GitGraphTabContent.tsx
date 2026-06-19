@@ -229,6 +229,7 @@ export function GitGraphTabContent() {
     fetching: t("toolbar.fetching"),
     matches: t("toolbar.matches"),
     head: t("toolbar.head"),
+    more: t("toolbar.more"),
   };
 
   const persistDetailsHeight = useCallback(() => {
