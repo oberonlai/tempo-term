@@ -6,6 +6,9 @@ use modules::fs::{
     fs_read_file, fs_reveal, fs_write_file,
 };
 use modules::ai::ai_chat;
+use modules::claude_progress::{
+    claude_progress_unwatch, claude_progress_watch, ClaudeProgressState,
+};
 use modules::clipboard::{
     terminal_clipboard_image_paths, terminal_clipboard_paths, terminal_clipboard_text,
     terminal_prepare_clipboard_image_attachment, terminal_save_dropped_image,
@@ -61,6 +64,7 @@ pub fn run() {
                 .build(),
         )
         .manage(PtyState::new())
+        .manage(ClaudeProgressState::new())
         .invoke_handler(tauri::generate_handler![
             pty_open,
             pty_write,
@@ -117,7 +121,9 @@ pub fn run() {
             terminal_history_load,
             terminal_history_delete,
             terminal_history_clear,
-            terminal_history_prune
+            terminal_history_prune,
+            claude_progress_watch,
+            claude_progress_unwatch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
