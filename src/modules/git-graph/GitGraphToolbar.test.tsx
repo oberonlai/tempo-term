@@ -77,6 +77,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof GitGraphToolbar>[0]>
     onRefresh: vi.fn(),
     onFetch: vi.fn(),
     fetching: false,
+    refreshing: false,
     currentBranch: "master",
     labels,
     ...overrides,
@@ -148,5 +149,23 @@ describe("GitGraphToolbar responsive layout", () => {
 
     fireEvent.click(screen.getByTitle(labels.search));
     expect(screen.getAllByLabelText(labels.branches).length).toBeGreaterThan(0);
+  });
+
+  it("spins and disables the refresh control while a reload is in flight (roomy)", () => {
+    renderToolbar({ refreshing: true });
+
+    const button = screen.getByTitle(labels.refresh);
+    expect(button).toBeDisabled();
+    expect(button.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("spins and disables the refresh row while a reload is in flight (compact)", () => {
+    renderToolbar({ refreshing: true });
+    setToolbarWidth(360);
+    fireEvent.click(screen.getByTitle(labels.more));
+
+    const row = screen.getByText(labels.refresh).closest("button");
+    expect(row).toBeDisabled();
+    expect(row?.querySelector(".animate-spin")).not.toBeNull();
   });
 });

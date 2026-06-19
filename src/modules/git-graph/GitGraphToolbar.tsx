@@ -50,6 +50,7 @@ interface GitGraphToolbarProps {
   onRefresh: () => void;
   onFetch: () => void;
   fetching: boolean;
+  refreshing: boolean;
   currentBranch: string;
   labels: GitGraphToolbarLabels;
 }
@@ -70,6 +71,7 @@ export function GitGraphToolbar({
   onRefresh,
   onFetch,
   fetching,
+  refreshing,
   currentBranch,
   labels,
 }: GitGraphToolbarProps) {
@@ -216,8 +218,13 @@ export function GitGraphToolbar({
                     {labels.head}: {currentBranch}
                   </div>
                   <ActionRow
-                    icon={<RefreshCw className="h-3.5 w-3.5" />}
+                    icon={
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                      />
+                    }
                     label={labels.refresh}
+                    disabled={refreshing}
                     onClick={() => {
                       setOverflowOpen(false);
                       onRefresh();
@@ -280,9 +287,10 @@ export function GitGraphToolbar({
               type="button"
               title={labels.refresh}
               onClick={onRefresh}
-              className="rounded p-1.5 text-fg-subtle hover:bg-bg-elevated hover:text-fg"
+              disabled={refreshing}
+              className="rounded p-1.5 text-fg-subtle hover:bg-bg-elevated hover:text-fg disabled:opacity-50"
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             </button>
 
             <button

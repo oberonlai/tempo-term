@@ -32,9 +32,13 @@ import {
 } from "./lib/gitGraphBridge";
 import { GitGraphToolbar, type GitGraphToolbarLabels } from "./GitGraphToolbar";
 import { filterCommits } from "./lib/filterCommits";
+import { withMinDuration } from "./lib/withMinDuration";
 import type { Branch, CommitNode, CommitRef, GraphOptions } from "./types";
 
 const PAGE_SIZE = 200;
+// Local git reloads finish almost instantly; keep the busy spinner up at least
+// this long so the refresh feedback is actually perceptible.
+const MIN_BUSY_MS = 400;
 
 type MenuTarget =
   | { type: "commit"; commit: CommitNode; x: number; y: number }
@@ -84,6 +88,9 @@ export function GitGraphTabContent() {
   const [includeStashes, setIncludeStashes] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [fetching, setFetching] = useState(false);
+  // Any action that reloads the graph (refresh button + context-menu git ops)
+  // flips this so the refresh icon spins while the reload is in flight.
+  const [busy, setBusy] = useState(false);
 
   const options: GraphOptions = {
     branch: selectedBranch,
@@ -165,11 +172,19 @@ export function GitGraphTabContent() {
         return;
       }
       setError(null);
+      setBusy(true);
       try {
-        await action();
-        await reload(repo, limit, options);
+        await withMinDuration(
+          (async () => {
+            await action();
+            await reload(repo, limit, options);
+          })(),
+          MIN_BUSY_MS,
+        );
       } catch (err: unknown) {
         setError(getErrorMessage(err));
+      } finally {
+        setBusy(false);
       }
     },
     [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes],
@@ -433,6 +448,7 @@ export function GitGraphTabContent() {
           onRefresh={() => void runAction(async () => {})}
           onFetch={() => void handleFetch()}
           fetching={fetching}
+          refreshing={busy}
           currentBranch={currentBranch}
           labels={toolbarLabels}
         />
