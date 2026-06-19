@@ -2,6 +2,7 @@
   "appName": "TempoTerm",
   "tagline": "AI-powered terminal workspace",
   "terminalConnecting": "Starting shell…",
+  "openLinkHint": "Cmd / Ctrl-click to open",
   "nav": {
     "terminal": "Terminal",
     "explorer": "Explorer",

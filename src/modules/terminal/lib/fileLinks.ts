@@ -19,12 +19,33 @@ export interface FilePathMatch {
 const FILE_PATH_RE =
   /(?:~\/|\.{0,2}\/)?(?:[\w.\-]+\/)*[\w.\-]+\.[A-Za-z0-9]+(?::\d+(?::\d+)?)?/g;
 
+// Web URLs are handled by the web-links addon; skip any file-looking token that
+// sits inside one so the two link providers don't fight over the same text.
+const WEB_URL_RE = /\bhttps?:\/\/\S+/g;
+
+function webUrlRanges(line: string): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  WEB_URL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = WEB_URL_RE.exec(line)) !== null) {
+    ranges.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return ranges;
+}
+
 export function findFilePaths(line: string): FilePathMatch[] {
   const out: FilePathMatch[] = [];
+  const urls = webUrlRanges(line);
   FILE_PATH_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = FILE_PATH_RE.exec(line)) !== null) {
-    out.push({ text: match[0], start: match.index, end: match.index + match[0].length });
+    const start = match.index;
+    const end = start + match[0].length;
+    const insideUrl = urls.some((u) => start < u.end && end > u.start);
+    if (insideUrl) {
+      continue;
+    }
+    out.push({ text: match[0], start, end });
   }
   return out;
 }

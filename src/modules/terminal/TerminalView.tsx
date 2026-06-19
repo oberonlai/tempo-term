@@ -85,12 +85,14 @@ export function TerminalView({
   onExitRef.current = onExit;
   const onOpenFileRef = useRef(onOpenFile);
   onOpenFileRef.current = onOpenFile;
+  const { t } = useTranslation();
+  const linkHintRef = useRef(t("openLinkHint"));
+  linkHintRef.current = t("openLinkHint");
 
   const fontFamily = useFontStore(selectTerminalFontFamily);
   const fontSize = useFontStore((s) => s.fontSize);
   const themeId = useSettingsStore((s) => s.themeId);
   const terminalPadding = useSettingsStore((s) => s.terminalPadding);
-  const { t } = useTranslation();
   const [connecting, setConnecting] = useState(true);
   const [externalFileDragging, setExternalFileDragging] = useState(false);
   const dragDepthRef = useRef(0);
@@ -108,6 +110,7 @@ export function TerminalView({
       fontFamily: selectTerminalFontFamily(initial),
       fontSize: initial.fontSize,
       theme: getTheme(useSettingsStore.getState().themeId).terminal,
+      linkHint: linkHintRef.current,
     });
     handleRef.current = handle;
     const { term, fit } = handle;

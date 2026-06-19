@@ -23,6 +23,12 @@ describe("findFilePaths", () => {
   it("ignores plain words without an extension", () => {
     expect(findFilePaths("just some regular words here")).toEqual([]);
   });
+
+  it("ignores file-looking tokens inside a web URL but still finds real paths", () => {
+    const matches = findFilePaths("see https://muki.tw/a.png and ./src/b.ts").map((m) => m.text);
+    expect(matches).toContain("./src/b.ts");
+    expect(matches.some((m) => m.includes("muki.tw") || m === "a.png")).toBe(false);
+  });
 });
 
 describe("resolveFilePath", () => {
