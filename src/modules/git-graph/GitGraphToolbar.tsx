@@ -156,7 +156,7 @@ export function GitGraphToolbar({
       </div>
 
       {/* 右側：搜尋一直在；其餘 compact 時收進 ⋯ */}
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 items-center gap-0.5">
         {searchOpen ? (
           <div className="flex min-w-0 items-center gap-1">
             <input
