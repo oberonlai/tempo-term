@@ -218,8 +218,20 @@ fn decode_lsof_name(raw: &str) -> String {
                     continue;
                 }
             }
-            if bytes[i + 1] == b'\\' {
-                out.push(b'\\');
+            // lsof also uses standard C escapes for control characters.
+            let escaped = match bytes[i + 1] {
+                b'\\' => Some(b'\\'),
+                b'a' => Some(0x07),
+                b'b' => Some(0x08),
+                b'f' => Some(0x0c),
+                b'n' => Some(b'\n'),
+                b'r' => Some(b'\r'),
+                b't' => Some(b'\t'),
+                b'v' => Some(0x0b),
+                _ => None,
+            };
+            if let Some(byte) = escaped {
+                out.push(byte);
                 i += 2;
                 continue;
             }
@@ -227,7 +239,9 @@ fn decode_lsof_name(raw: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8_lossy(&out).into_owned()
+    // Reuse the buffer when it is already valid UTF-8 (the normal case); only
+    // fall back to lossy replacement for genuinely invalid bytes.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 #[cfg(target_os = "macos")]
@@ -360,5 +374,7 @@ mod tests {
         // Plain ASCII paths are unchanged; an escaped backslash becomes one.
         assert_eq!(decode_lsof_name("/Users/muki/Documents"), "/Users/muki/Documents");
         assert_eq!(decode_lsof_name("/a/b\\\\c"), "/a/b\\c");
+        // Standard C escapes for control characters are decoded too.
+        assert_eq!(decode_lsof_name("/a/b\\tc"), "/a/b\tc");
     }
 }
