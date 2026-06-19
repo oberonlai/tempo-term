@@ -32,3 +32,6 @@ docs/
 # ~/.tempoterm). These patterns are a safety net if one is ever copied in.
 *.key
 updater-key*.json
+
+# Claude Code local state (settings, worktrees, transcripts, etc.)
+.claude/
