@@ -116,6 +116,23 @@ fn mangle_cwd(cwd: &str) -> String {
         .collect()
 }
 
+/// The base config directory Claude Code writes transcripts under: the
+/// `CLAUDE_CONFIG_DIR` override when set and non-empty, otherwise `~/.claude`.
+/// A leading `~` in the override is expanded against `home`; shells usually
+/// expand it first, but a literal `~` can still reach us from a config file.
+fn config_base_dir(home: &Path, env_value: Option<&str>) -> PathBuf {
+    match env_value {
+        Some(value) if !value.trim().is_empty() => {
+            let path = Path::new(value);
+            match path.strip_prefix("~") {
+                Ok(rest) => home.join(rest),
+                Err(_) => path.to_path_buf(),
+            }
+        }
+        _ => home.join(".claude"),
+    }
+}
+
 /// The most recently modified `.jsonl` transcript in `dir`, if any.
 fn latest_transcript(dir: &Path) -> Option<PathBuf> {
     let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
@@ -254,6 +271,8 @@ pub fn claude_progress_watch(
     cwds: Vec<String>,
 ) -> Result<(), String> {
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let env_value = std::env::var("CLAUDE_CONFIG_DIR").ok();
+    let base = config_base_dir(&home, env_value.as_deref());
     let mut watchers = state.watchers.lock().unwrap();
 
     watchers.retain(|cwd, _| cwds.contains(cwd));
@@ -262,7 +281,7 @@ pub fn claude_progress_watch(
         if watchers.contains_key(&cwd) {
             continue;
         }
-        let dir = home.join(".claude").join("projects").join(mangle_cwd(&cwd));
+        let dir = base.join("projects").join(mangle_cwd(&cwd));
         if !dir.is_dir() {
             continue;
         }
@@ -428,5 +447,30 @@ mod tests {
         assert_eq!(byte_len(&dir.join("missing.jsonl")), 0);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_base_dir_uses_env_override_when_set() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            config_base_dir(home, Some("/custom/cc")),
+            PathBuf::from("/custom/cc")
+        );
+    }
+
+    #[test]
+    fn config_base_dir_falls_back_to_dot_claude_when_unset_or_blank() {
+        let home = Path::new("/home/u");
+        assert_eq!(config_base_dir(home, None), PathBuf::from("/home/u/.claude"));
+        assert_eq!(config_base_dir(home, Some("  ")), PathBuf::from("/home/u/.claude"));
+    }
+
+    #[test]
+    fn config_base_dir_expands_a_leading_tilde_against_home() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            config_base_dir(home, Some("~/.claude_custom")),
+            PathBuf::from("/home/u/.claude_custom")
+        );
     }
 }

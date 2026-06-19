@@ -1,27 +1,51 @@
 import { describe, expect, it } from "vitest";
-import { emptyProgressState, reduceProgress } from "./progressState";
+import { deriveStatus, emptyProgressState, MAX_ACTIVITIES, reduceProgress } from "./progressState";
 
 describe("reduceProgress", () => {
-  it("adds a started tool to the running list", () => {
+  it("adds a started tool to activities as running", () => {
     const state = reduceProgress(emptyProgressState(), {
       kind: "tool:start",
       id: "t1",
       name: "Bash",
     });
 
-    expect(state.runningTools).toEqual([{ id: "t1", name: "Bash" }]);
+    expect(state.activities).toEqual([{ id: "t1", name: "Bash", status: "running" }]);
   });
 
-  it("removes a tool from the running list when it ends", () => {
-    let state = reduceProgress(emptyProgressState(), {
-      kind: "tool:start",
-      id: "t1",
-      name: "Bash",
-    });
+  it("marks a tool done on end and keeps it in activities", () => {
+    let state = reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
     state = reduceProgress(state, { kind: "tool:start", id: "t2", name: "Read" });
     state = reduceProgress(state, { kind: "tool:end", id: "t1", name: "Bash", ok: true });
 
-    expect(state.runningTools).toEqual([{ id: "t2", name: "Read" }]);
+    expect(state.activities).toEqual([
+      { id: "t1", name: "Bash", status: "done" },
+      { id: "t2", name: "Read", status: "running" },
+    ]);
+  });
+
+  it("marks a tool error when it ends with ok=false", () => {
+    let state = reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
+    state = reduceProgress(state, { kind: "tool:end", id: "t1", name: "Bash", ok: false });
+
+    expect(state.activities).toEqual([{ id: "t1", name: "Bash", status: "error" }]);
+  });
+
+  it("ignores tool:end for an unknown id", () => {
+    const start = reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
+    const next = reduceProgress(start, { kind: "tool:end", id: "nope", name: "X", ok: true });
+
+    expect(next).toBe(start);
+  });
+
+  it("caps activities at MAX_ACTIVITIES, dropping the oldest", () => {
+    let state = emptyProgressState();
+    for (let i = 0; i < MAX_ACTIVITIES + 5; i++) {
+      state = reduceProgress(state, { kind: "tool:start", id: `t${i}`, name: "Bash" });
+    }
+
+    expect(state.activities).toHaveLength(MAX_ACTIVITIES);
+    expect(state.activities[0].id).toBe("t5");
+    expect(state.activities[MAX_ACTIVITIES - 1].id).toBe(`t${MAX_ACTIVITIES + 4}`);
   });
 
   it("adds a started subagent as running", () => {
@@ -120,5 +144,23 @@ describe("reduceProgress", () => {
     const next = reduceProgress(state, { kind: "idle" });
 
     expect(next).toBe(state);
+  });
+
+  it("derives active when a tool or subagent is running", () => {
+    const state = reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
+    expect(deriveStatus(state)).toBe("active");
+  });
+
+  it("derives idle when idle and nothing is running", () => {
+    let state = reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
+    state = reduceProgress(state, { kind: "tool:end", id: "t1", name: "Bash", ok: true });
+    state = reduceProgress(state, { kind: "idle" });
+    expect(deriveStatus(state)).toBe("idle");
+  });
+
+  it("derives thinking when there is history but nothing running and not idle", () => {
+    let state = reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
+    state = reduceProgress(state, { kind: "tool:end", id: "t1", name: "Bash", ok: true });
+    expect(deriveStatus(state)).toBe("thinking");
   });
 });

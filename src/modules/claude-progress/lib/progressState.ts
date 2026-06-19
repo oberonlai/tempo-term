@@ -1,9 +1,14 @@
 import type { ProgressEvent, TodoItem } from "./normalize";
 
-export interface RunningTool {
+export type ActivityStatus = "running" | "done" | "error";
+
+export interface ToolActivity {
   id: string;
   name: string;
+  status: ActivityStatus;
 }
+
+export const MAX_ACTIVITIES = 30;
 
 export interface SubagentProgress {
   id: string;
@@ -16,14 +21,14 @@ export interface SubagentProgress {
 }
 
 export interface ProgressState {
-  runningTools: RunningTool[];
+  activities: ToolActivity[];
   subagents: SubagentProgress[];
   todos: TodoItem[];
   idle: boolean;
 }
 
 export function emptyProgressState(): ProgressState {
-  return { runningTools: [], subagents: [], todos: [], idle: false };
+  return { activities: [], subagents: [], todos: [], idle: false };
 }
 
 /**
@@ -34,17 +39,25 @@ export function emptyProgressState(): ProgressState {
  */
 export function reduceProgress(state: ProgressState, event: ProgressEvent): ProgressState {
   switch (event.kind) {
-    case "tool:start":
-      return {
-        ...state,
-        idle: false,
-        runningTools: [...state.runningTools, { id: event.id, name: event.name }],
-      };
-    case "tool:end":
-      return {
-        ...state,
-        runningTools: state.runningTools.filter((tool) => tool.id !== event.id),
-      };
+    case "tool:start": {
+      const next = [
+        ...state.activities,
+        { id: event.id, name: event.name, status: "running" as const },
+      ];
+      const activities = next.length > MAX_ACTIVITIES ? next.slice(next.length - MAX_ACTIVITIES) : next;
+      return { ...state, idle: false, activities };
+    }
+    case "tool:end": {
+      const index = state.activities.findIndex(
+        (activity) => activity.id === event.id && activity.status === "running",
+      );
+      if (index === -1) {
+        return state;
+      }
+      const activities = state.activities.slice();
+      activities[index] = { ...activities[index], status: event.ok ? "done" : "error" };
+      return { ...state, activities };
+    }
     case "subagent:start":
       return {
         ...state,
@@ -99,6 +112,23 @@ function todosEqual(a: TodoItem[], b: TodoItem[]): boolean {
     return false;
   }
   return a.every((item, index) => item.text === b[index].text && item.status === b[index].status);
+}
+
+/**
+ * The session's coarse state for the panel header: actively running a tool or
+ * subagent, finished and waiting for input (idle), or thinking between actions.
+ */
+export function deriveStatus(progress: ProgressState): "active" | "thinking" | "idle" {
+  const running =
+    progress.activities.some((activity) => activity.status === "running") ||
+    progress.subagents.some((subagent) => subagent.status === "running");
+  if (running) {
+    return "active";
+  }
+  if (progress.idle) {
+    return "idle";
+  }
+  return "thinking";
 }
 
 export type { TodoItem };
