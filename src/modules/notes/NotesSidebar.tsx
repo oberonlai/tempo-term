@@ -86,7 +86,10 @@ function FolderRow({ folder, depth }: { folder: FolderNode; depth: number }) {
   function commitRename() {
     const next = draft.trim();
     if (next && next !== folder.name) {
-      void renameFolder(folder.path, next);
+      // Resync from disk if the rename is refused (e.g. a name collision).
+      void renameFolder(folder.path, next).catch(() =>
+        useNotesStore.getState().refresh(),
+      );
     }
     setEditing(false);
   }
@@ -199,8 +202,8 @@ export function NotesSidebar() {
     if (!rootPath) {
       return;
     }
-    // Ignore rejection when a folder with the default name already exists.
-    void createFolder(rootPath, "New Folder").catch(() => {});
+    // createFolder deduplicates the name, so this never collides.
+    void createFolder(rootPath, "New Folder");
   }
 
   return (

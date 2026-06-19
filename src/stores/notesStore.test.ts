@@ -86,12 +86,25 @@ describe("notesStore.createNote", () => {
     expect(path).toBe("/root/Untitled 2.md");
     expect(mocked.fsCreateFile).toHaveBeenCalledWith("/root/Untitled 2.md");
   });
+
+  it("dedupes case-insensitively (case-insensitive filesystems)", async () => {
+    withDirs({ "/root": [file("untitled.md")] });
+    const path = await useNotesStore.getState().createNote("/root");
+    expect(path).toBe("/root/Untitled 2.md");
+  });
 });
 
 describe("notesStore.createFolder", () => {
   it("creates a directory and refreshes", async () => {
     await useNotesStore.getState().createFolder("/root", "Ideas");
     expect(mocked.fsCreateDir).toHaveBeenCalledWith("/root/Ideas");
+  });
+
+  it("dedupes the folder name when it already exists", async () => {
+    withDirs({ "/root": [dir("New Folder")] });
+    const path = await useNotesStore.getState().createFolder("/root", "New Folder");
+    expect(path).toBe("/root/New Folder 2");
+    expect(mocked.fsCreateDir).toHaveBeenCalledWith("/root/New Folder 2");
   });
 });
 

@@ -52,26 +52,44 @@ function baseName(path: string): string {
   return idx < 0 ? path : path.slice(idx + 1);
 }
 
+// Guard against unbounded recursion if the chosen folder contains a symlink
+// cycle (cloud-drive folders sometimes do). Notes hierarchies are never deep.
+const MAX_TREE_DEPTH = 32;
+
 /** Recursively read a directory into a sorted notes tree. */
-async function readTree(dir: string): Promise<NotesNode[]> {
+async function readTree(dir: string, depth = 0): Promise<NotesNode[]> {
+  if (depth > MAX_TREE_DEPTH) {
+    return [];
+  }
   const entries = await fsReadDir(dir);
   const childrenByPath = new Map<string, NotesNode[]>();
-  for (const entry of entries) {
-    if (entry.is_dir) {
-      childrenByPath.set(entry.path, await readTree(entry.path));
-    }
-  }
+  // Read subdirectories in parallel; deep trees would be slow read serially.
+  await Promise.all(
+    entries
+      .filter((entry) => entry.is_dir)
+      .map(async (entry) => {
+        childrenByPath.set(entry.path, await readTree(entry.path, depth + 1));
+      }),
+  );
   return nodesFromEntries(entries, (folderPath) => childrenByPath.get(folderPath) ?? []);
 }
 
-/** Pick a free `<base> N.md` name given the filenames already in a directory. */
-async function uniqueNotePath(dirPath: string, base: string): Promise<string> {
+/**
+ * Pick a free name in a directory, comparing case-insensitively so it works on
+ * case-insensitive filesystems (macOS, Windows) where `untitled.md` and
+ * `Untitled.md` collide. `suffix` is appended to the base (e.g. `.md`).
+ */
+async function uniqueChildPath(
+  dirPath: string,
+  base: string,
+  suffix: string,
+): Promise<string> {
   const entries = await fsReadDir(dirPath);
-  const existing = new Set(entries.map((e) => e.name));
-  let name = `${base}.md`;
+  const existing = new Set(entries.map((e) => e.name.toLowerCase()));
+  let name = `${base}${suffix}`;
   let n = 2;
-  while (existing.has(name)) {
-    name = `${base} ${n}.md`;
+  while (existing.has(name.toLowerCase())) {
+    name = `${base} ${n}${suffix}`;
     n += 1;
   }
   return joinPath(dirPath, name);
@@ -109,14 +127,14 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
   writeNote: (path, content) => fsWriteFile(path, content),
 
   createNote: async (dirPath) => {
-    const path = await uniqueNotePath(dirPath, "Untitled");
+    const path = await uniqueChildPath(dirPath, "Untitled", ".md");
     await fsCreateFile(path);
     await get().refresh();
     return path;
   },
 
   createFolder: async (dirPath, name) => {
-    const path = joinPath(dirPath, name);
+    const path = await uniqueChildPath(dirPath, name, "");
     await fsCreateDir(path);
     await get().refresh();
     return path;

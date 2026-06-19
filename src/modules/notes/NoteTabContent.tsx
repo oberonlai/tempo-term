@@ -12,15 +12,25 @@ function basename(path: string): string {
   return idx < 0 ? path : path.slice(idx + 1);
 }
 
-export function NoteTabContent({ noteId, tabId }: { noteId: string; tabId: string }) {
+interface NoteTabContentProps {
+  noteId: string;
+  tabId: string;
+  leafId: string;
+}
+
+export function NoteTabContent({ noteId, tabId, leafId }: NoteTabContentProps) {
   const { t } = useTranslation("notes");
   const setTabTitle = useTabsStore((s) => s.setTabTitle);
+  const setPaneContent = useTabsStore((s) => s.setPaneContent);
 
   const [path, setPath] = useState(noteId);
   const [title, setTitle] = useState(() => titleFromFilename(basename(noteId)));
   const [content, setContent] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest editor content not yet flushed to disk, so a rename can persist it
+  // to the current path before moving the file.
+  const pending = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,19 +63,44 @@ export function NoteTabContent({ noteId, tabId }: { noteId: string; tabId: strin
 
   function commitTitle() {
     void (async () => {
-      const newPath = await useNotesStore.getState().renameNote(path, title);
-      setPath(newPath);
-      setTitle(titleFromFilename(basename(newPath)));
-      setTabTitle(tabId, title || "Untitled");
+      const store = useNotesStore.getState();
+      try {
+        // Flush any pending edit to the current path first so the rename moves
+        // the latest content instead of a stale debounced timer firing at the
+        // old path after the file has already moved.
+        if (writeTimer.current) {
+          clearTimeout(writeTimer.current);
+          writeTimer.current = null;
+        }
+        if (pending.current !== null) {
+          await store.writeNote(path, pending.current);
+          pending.current = null;
+        }
+        const newPath = await store.renameNote(path, title);
+        if (newPath !== path) {
+          setPaneContent(tabId, leafId, { kind: "note", noteId: newPath });
+          setPath(newPath);
+        }
+        const finalTitle = titleFromFilename(basename(newPath));
+        setTitle(finalTitle);
+        setTabTitle(tabId, finalTitle || "Untitled");
+      } catch {
+        // Rename refused (e.g. a name collision); resync the input to the
+        // on-disk name and reload the tree so the UI reflects reality.
+        setTitle(titleFromFilename(basename(path)));
+        void store.refresh();
+      }
     })();
   }
 
   function scheduleWrite(markdown: string) {
+    pending.current = markdown;
     if (writeTimer.current) {
       clearTimeout(writeTimer.current);
     }
     const target = path;
     writeTimer.current = setTimeout(() => {
+      pending.current = null;
       void useNotesStore.getState().writeNote(target, markdown);
     }, WRITE_DEBOUNCE_MS);
   }

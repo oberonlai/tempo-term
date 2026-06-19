@@ -45,7 +45,9 @@ export function applyNoteDrop(
   if (!target) {
     return;
   }
-  void actions.moveNote(notePath, target.path);
+  // Swallow a refused move (e.g. a name collision in the target folder); the
+  // tree is unchanged in that case, so nothing needs resyncing.
+  void actions.moveNote(notePath, target.path).catch(() => {});
 }
 
 interface NoteDragState {
