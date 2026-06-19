@@ -24,9 +24,13 @@ import { runCommandInTerminal } from "@/modules/terminal/lib/terminalBus";
 import { isWebUrl } from "@/lib/url";
 import { createSlashCommand } from "./slashCommand";
 import { registerNoteInserter, unregisterNoteInserter } from "./lib/noteBus";
+import { bashCommandHighlight } from "./lib/bashCommandHighlight";
 import { Combobox } from "@/components/Combobox";
 
 const lowlight = createLowlight(common);
+// Override the stock bash grammar so leading command names (ssh, git, custom
+// scripts) get colored too, not only highlight.js's built-in whitelist.
+lowlight.register("bash", bashCommandHighlight);
 const SHELL_LANGS = new Set(["", "sh", "bash", "zsh", "shell", "console", "terminal"]);
 
 const CODE_LANGS = [
