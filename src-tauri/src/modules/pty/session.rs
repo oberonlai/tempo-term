@@ -199,6 +199,37 @@ pub fn cwd(state: &PtyState, id: u32) -> Result<Option<String>, String> {
     Ok(pid.and_then(read_process_cwd))
 }
 
+/// lsof `-Fn` escapes non-printable/non-ASCII bytes as literal `\xHH` text (and
+/// `\` as `\\`). Decode those back to the original bytes so a non-ASCII path
+/// (e.g. a Chinese folder name) is real UTF-8 rather than a literal `\xe6...`.
+#[cfg(target_os = "macos")]
+fn decode_lsof_name(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'x' && i + 3 < bytes.len() {
+                let hi = (bytes[i + 2] as char).to_digit(16);
+                let lo = (bytes[i + 3] as char).to_digit(16);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi * 16 + lo) as u8);
+                    i += 4;
+                    continue;
+                }
+            }
+            if bytes[i + 1] == b'\\' {
+                out.push(b'\\');
+                i += 2;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg(target_os = "macos")]
 fn read_process_cwd(pid: i32) -> Option<String> {
     let output = std::process::Command::new("lsof")
@@ -207,7 +238,7 @@ fn read_process_cwd(pid: i32) -> Option<String> {
         .ok()?;
     String::from_utf8_lossy(&output.stdout)
         .lines()
-        .find_map(|line| line.strip_prefix('n').map(|p| p.to_string()))
+        .find_map(|line| line.strip_prefix('n').map(|p| decode_lsof_name(p)))
 }
 
 #[cfg(target_os = "linux")]
@@ -319,5 +350,15 @@ mod tests {
         let id = spawn_with_sinks(&state, 80, 24, cmd, "echo".to_string(), |_| true, |_| {})
             .expect("spawn should succeed");
         assert!(state.get(id).is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn decodes_lsof_escaped_non_ascii_back_to_utf8() {
+        // lsof -Fn prints non-ASCII bytes as literal \xHH; decode them back.
+        assert_eq!(decode_lsof_name("/a/\\xe6\\x96\\x87"), "/a/文");
+        // Plain ASCII paths are unchanged; an escaped backslash becomes one.
+        assert_eq!(decode_lsof_name("/Users/muki/Documents"), "/Users/muki/Documents");
+        assert_eq!(decode_lsof_name("/a/b\\\\c"), "/a/b\\c");
     }
 }
