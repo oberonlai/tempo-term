@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
@@ -59,6 +59,13 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   const closePane = useTabsStore((s) => s.closePane);
   const isActiveTab = useTabsStore((s) => s.activeId === tab.id);
   const paneAreaRef = useRef<HTMLDivElement>(null);
+  // Which splitter is currently being dragged, so its hairline keeps its
+  // highlight color even when the pointer slips off the thin hit area mid-drag.
+  const [draggingSplitterId, setDraggingSplitterId] = useState<string | null>(null);
+  // Which splitter the pointer is hovering. Tracked in state (not CSS
+  // group-hover) because the hairline lives in a child element and group-hover
+  // doesn't reach it reliably in the app's WebView.
+  const [hoveredSplitterId, setHoveredSplitterId] = useState<string | null>(null);
   // Pointer-drag state lives in the explorer drag store (see dragEntry.ts): the
   // entry being dragged, which pane it's over, and a resolved drop to consume.
   const dragging = useEntryDragStore((s) => s.dragging);
@@ -154,6 +161,7 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
 
     document.body.style.cursor = isRow ? "col-resize" : "row-resize";
     document.body.style.userSelect = "none";
+    setDraggingSplitterId(splitter.id);
 
     function onMove(ev: MouseEvent) {
       const box = container!.getBoundingClientRect();
@@ -167,6 +175,7 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
     function onUp() {
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      setDraggingSplitterId(null);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     }
@@ -268,10 +277,14 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
           const dividerPct = isRow
             ? splitter.rect.left + splitter.rect.width * splitter.fraction
             : splitter.rect.top + splitter.rect.height * splitter.fraction;
+          const isLit =
+            draggingSplitterId === splitter.id || hoveredSplitterId === splitter.id;
           return (
             <div
               key={splitter.id}
               onMouseDown={(e) => startDrag(e, splitter)}
+              onMouseEnter={() => setHoveredSplitterId(splitter.id)}
+              onMouseLeave={() => setHoveredSplitterId(null)}
               style={
                 isRow
                   ? {
@@ -291,10 +304,26 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
                       transform: "translateY(-50%)",
                     }
               }
-              className={`z-20 transition-colors hover:bg-accent/40 ${
+              className={`z-20 ${
                 isRow ? "cursor-col-resize" : "cursor-row-resize"
               }`}
-            />
+            >
+              {/*
+               * The hit area stays 8px so the divider is easy to grab, but only
+               * this centered 1px hairline is visible. Hover / drag just recolors
+               * the hairline instead of flooding the whole strip, so the divider
+               * never looks like it got thicker.
+               */}
+              <div
+                className={`pointer-events-none absolute transition-colors ${
+                  isLit ? "bg-accent" : "bg-transparent"
+                } ${
+                  isRow
+                    ? "inset-y-0 left-1/2 w-px -translate-x-1/2"
+                    : "inset-x-0 top-1/2 h-px -translate-y-1/2"
+                }`}
+              />
+            </div>
           );
         })}
       </div>

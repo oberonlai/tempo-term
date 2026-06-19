@@ -34,6 +34,7 @@ import { findFilePaths, resolveFilePath } from "./lib/fileLinks";
 import { buildCellPositions, type TerminalRow } from "./lib/cellPositions";
 import { terminalKeySequence } from "./lib/terminalKeymap";
 import { shouldCdToRoot } from "./lib/cwdSync";
+import { debounce } from "@/lib/debounce";
 import { dropOverlayClassName } from "@/components/EntryDropOverlay";
 import { fsHomeDir, fsReadFile } from "@/modules/explorer/lib/fsBridge";
 import { getDraggedEntry } from "@/modules/explorer/lib/dragEntry";
@@ -475,12 +476,20 @@ export function TerminalView({
     };
     const snapshotTimer = setInterval(snapshot, 5000);
 
-    const observer = new ResizeObserver(() => {
-      safeFit();
+    // Telling the PTY its new size sends SIGWINCH, which makes the shell repaint
+    // its prompt. A divider drag fires this observer dozens of times a second, so
+    // pushing every intermediate size spams the shell with reprinted prompts.
+    // safeFit stays immediate (xterm reflows in step with the pane), but the PTY
+    // resize is debounced to the size the drag settles on.
+    const pushPtySize = debounce(() => {
       const session = sessionRef.current;
       if (session) {
         void session.resize(term.cols, term.rows);
       }
+    }, 80);
+    const observer = new ResizeObserver(() => {
+      safeFit();
+      pushPtySize();
     });
     observer.observe(container);
 
@@ -489,6 +498,7 @@ export function TerminalView({
       clearInterval(snapshotTimer);
       writeListener.dispose();
       observer.disconnect();
+      pushPtySize.cancel();
       document.removeEventListener("keydown", onKeyDownCapture, true);
       document.removeEventListener("paste", onPasteCapture, true);
       if (leafIdRef.current) {
