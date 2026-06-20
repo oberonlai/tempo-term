@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { matchesOpenModifier, openModifierLabel } from "./platform";
 
 type Mods = { altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean };
@@ -31,4 +31,36 @@ describe("matchesOpenModifier", () => {
 describe("openModifierLabel", () => {
   it("mac label", () => expect(openModifierLabel(true)).toBe("Alt / Cmd"));
   it("non-mac label", () => expect(openModifierLabel(false)).toBe("Alt / Ctrl"));
+});
+
+// IS_MAC is evaluated at module load, so each case stubs navigator, resets the
+// module registry, and re-imports to observe a fresh evaluation.
+describe("IS_MAC platform detection", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  async function loadIsMac(nav: unknown): Promise<boolean> {
+    vi.stubGlobal("navigator", nav);
+    vi.resetModules();
+    const mod = await import("./platform");
+    return mod.IS_MAC;
+  }
+
+  it("does not throw and falls back to userAgent when platform is undefined", async () => {
+    await expect(
+      loadIsMac({ userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X)", platform: undefined }),
+    ).resolves.toBe(true);
+  });
+
+  it("detects mac via platform when userAgent is missing", async () => {
+    await expect(loadIsMac({ platform: "MacIntel" })).resolves.toBe(true);
+  });
+
+  it("is false on a non-mac platform", async () => {
+    await expect(
+      loadIsMac({ userAgent: "Mozilla/5.0 (Windows NT 10.0)", platform: "Win32" }),
+    ).resolves.toBe(false);
+  });
 });

@@ -1,10 +1,16 @@
 /**
  * Single source of truth for platform detection and the link-open gesture.
  * Mac opens links on Alt or Cmd; Windows and other non-mac on Alt or Ctrl.
+ *
+ * navigator.platform is deprecated and may be undefined in some runtimes, so we
+ * guard it with optional chaining and fall back to userAgent to avoid throwing
+ * at module load.
  */
 export const IS_MAC =
   typeof navigator !== "undefined" &&
-  navigator.platform.toLowerCase().includes("mac");
+  (navigator.platform?.toLowerCase().includes("mac") ||
+    navigator.userAgent?.toLowerCase().includes("mac") ||
+    false);
 
 type ModifierEvent = Pick<MouseEvent, "altKey" | "metaKey" | "ctrlKey">;
 
