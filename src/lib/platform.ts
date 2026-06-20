@@ -1,0 +1,24 @@
+/**
+ * Single source of truth for platform detection and the link-open gesture.
+ * Mac opens links on Alt or Cmd; Windows and other non-mac on Alt or Ctrl.
+ */
+export const IS_MAC =
+  typeof navigator !== "undefined" &&
+  navigator.platform.toLowerCase().includes("mac");
+
+type ModifierEvent = Pick<MouseEvent, "altKey" | "metaKey" | "ctrlKey">;
+
+/** Whether a click carries the platform's open-link modifier. */
+export function matchesOpenModifier(
+  event: ModifierEvent,
+  isMac: boolean = IS_MAC,
+): boolean {
+  return isMac
+    ? event.altKey || event.metaKey
+    : event.altKey || event.ctrlKey;
+}
+
+/** Modifier-key label shown in the link hover tooltip. */
+export function openModifierLabel(isMac: boolean = IS_MAC): string {
+  return isMac ? "Alt / Cmd" : "Alt / Ctrl";
+}
