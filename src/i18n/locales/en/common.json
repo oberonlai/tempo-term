@@ -4,6 +4,7 @@
   "terminalConnecting": "Starting shell…",
   "openLinkHint": "{{mods}}-click to open",
   "nav": {
+    "workspaces": "Workspaces",
     "terminal": "Terminal",
     "explorer": "Explorer",
     "editor": "Editor",
