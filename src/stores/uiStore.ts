@@ -20,7 +20,7 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set) => ({
-  sidebarView: "explorer",
+  sidebarView: "workspaces",
   sidebarVisible: true,
   settingsOpen: false,
   terminalOpen: true,
