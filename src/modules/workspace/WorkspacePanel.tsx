@@ -269,7 +269,6 @@ function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: St
 
         {!editing && (
           <>
-            <span className="shrink-0 text-[11px] text-fg-subtle">{tabs.length}</span>
             <button
               type="button"
               aria-label={t("workspace.renameSpace")}
@@ -291,6 +290,9 @@ function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: St
             >
               <Trash2 size={12} />
             </button>
+            <span className="shrink-0 rounded-full bg-border px-1.5 py-0.5 text-[11px] leading-none text-fg-subtle">
+              {tabs.length}
+            </span>
           </>
         )}
       </div>
