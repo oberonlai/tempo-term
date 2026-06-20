@@ -151,12 +151,14 @@ pub async fn pr_via_api(cwd: String, branch: String) -> Result<Option<PrInfo>, S
         Some(pair) => pair,
         None => return Ok(None),
     };
-    let api = format!(
-        "https://api.github.com/repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=all&per_page=1"
-    );
+    // Build the query with reqwest so the branch (which may contain characters
+    // like '/') is URL-encoded rather than formatted raw into the URL.
+    let api = format!("https://api.github.com/repos/{owner}/{repo}/pulls");
+    let head = format!("{owner}:{branch}");
     let client = reqwest::Client::new();
     let response = client
         .get(&api)
+        .query(&[("head", head.as_str()), ("state", "all"), ("per_page", "1")])
         .header("User-Agent", "tempo-term")
         .header("Accept", "application/vnd.github+json")
         .header("Authorization", format!("Bearer {token}"))

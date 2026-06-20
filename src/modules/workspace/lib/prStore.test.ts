@@ -46,4 +46,10 @@ describe("prStore", () => {
     await usePrStore.getState().refresh("/a", "main", "gh");
     expect(usePrStore.getState().prs["/a"]).toEqual(pr);
   });
+
+  it("records a fetch timestamp even when the fetch fails, to avoid retry storms", async () => {
+    vi.mocked(prViaGh).mockRejectedValue(new Error("boom"));
+    await usePrStore.getState().refresh("/a", "main", "gh");
+    expect(usePrStore.getState().fetchedAt["/a"]).toBeTypeOf("number");
+  });
 });

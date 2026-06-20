@@ -259,9 +259,13 @@ export function WorkspacePanel() {
   const infos = useWorktreeStore((s) => s.infos);
   const showPr = useSettingsStore((s) => s.workspaceCard.pr);
   const prSource = useSettingsStore((s) => s.prSource);
-  const cwds = tabs
-    .map((tab) => deriveTabCwd(tab))
-    .filter((cwd): cwd is string => cwd !== null);
+  // Dedupe so multiple tabs in the same directory don't trigger redundant IPC
+  // and network lookups for that directory.
+  const cwds = Array.from(
+    new Set(
+      tabs.map((tab) => deriveTabCwd(tab)).filter((cwd): cwd is string => cwd !== null),
+    ),
+  );
   useWorktreeInfos(cwds);
   useWorkspaceTitles(cwds);
 

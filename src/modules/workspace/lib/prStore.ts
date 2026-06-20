@@ -43,7 +43,11 @@ export const usePrStore = create<PrStoreState>((set) => ({
         fetchedAt: { ...state.fetchedAt, [cwd]: Date.now() },
       }));
     } catch {
-      // gh missing, no token, or network error; leave any previous value.
+      // gh missing, no token, or network error: keep any previous PR value but
+      // still stamp the fetch time so a failing cwd is not retried every focus.
+      set((state) => ({
+        fetchedAt: { ...state.fetchedAt, [cwd]: Date.now() },
+      }));
     }
   },
 }));

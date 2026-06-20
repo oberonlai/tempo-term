@@ -32,13 +32,9 @@ export function useWorkspacePrs(pairs: { cwd: string; branch: string }[], source
       }
     };
     fetchStale();
-    const onFocus = () => {
-      for (const pair of pairs) {
-        if (pair.branch) {
-          void refresh(pair.cwd, pair.branch, source);
-        }
-      }
-    };
+    // On focus, only refetch entries past the stale window so toggling focus
+    // can't trigger a storm of gh spawns or API requests.
+    const onFocus = () => fetchStale();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
     // `key` already encodes the pairs and source; pairs is recreated each render.

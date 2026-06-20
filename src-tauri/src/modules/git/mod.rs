@@ -233,11 +233,19 @@ pub struct WorktreeInfo {
     pub main_path: Option<String>,
 }
 
-/// The current branch shorthand (e.g. "main"), or None on a detached/unborn HEAD.
+/// The current branch shorthand (e.g. "main"). Falls back to HEAD's symbolic
+/// target so a fresh repo with no commits (an unborn branch) still reports its
+/// name; None only on a truly detached HEAD.
 fn head_shorthand(repo: &Repository) -> Option<String> {
     repo.head()
         .ok()
         .and_then(|h| h.shorthand().map(|s| s.to_string()))
+        .or_else(|| {
+            repo.find_reference("HEAD")
+                .ok()
+                .and_then(|r| r.symbolic_target().map(str::to_string))
+                .map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_string())
+        })
 }
 
 /// A workdir path as a clean string, without a trailing slash.
@@ -1015,6 +1023,19 @@ mod tests {
         assert_eq!(info.branch.as_deref(), Some("main"));
         assert!(!info.is_worktree);
         assert!(info.main_branch.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_info_reports_the_unborn_branch_before_any_commit() {
+        let dir = temp_repo_dir("wt-unborn");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init", "-b", "main"]).unwrap();
+
+        // No commit yet: HEAD is unborn, but the branch name should still show.
+        let info = worktree_info(&path).unwrap();
+        assert_eq!(info.branch.as_deref(), Some("main"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
