@@ -118,6 +118,12 @@ pub fn pr_via_gh(cwd: String, branch: Option<String>) -> Result<Option<PrInfo>, 
     let mut args: Vec<&str> = vec!["pr", "view"];
     let branch = branch.unwrap_or_default();
     if !branch.is_empty() {
+        // A branch name beginning with '-' would be read by gh as a flag (argv
+        // flag smuggling). Real branches never start with '-', so refuse rather
+        // than risk smuggling an option in; the card simply shows no PR.
+        if branch.starts_with('-') {
+            return Ok(None);
+        }
         args.push(&branch);
     }
     args.extend(["--json", "number,state,isDraft,url,title"]);
@@ -209,6 +215,12 @@ mod tests {
         assert_eq!(normalize_api_state("closed", false, false), "closed");
         assert_eq!(normalize_api_state("open", true, false), "draft");
         assert_eq!(normalize_api_state("open", false, false), "open");
+    }
+
+    #[test]
+    fn pr_via_gh_refuses_a_flag_like_branch() {
+        // A branch starting with '-' must not reach gh as a positional arg.
+        assert_eq!(pr_via_gh(".".into(), Some("-x".into())), Ok(None));
     }
 
     #[test]
