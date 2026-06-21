@@ -88,9 +88,9 @@ function BranchLine({
     return null;
   }
   return (
-    <span className="flex items-center gap-1 text-[11px] text-fg-subtle">
+    <span className="flex min-w-0 items-center gap-1 text-[11px] text-fg-subtle">
       <GitBranch size={11} className="shrink-0" />
-      {shownBranch && <span className="shrink-0 text-fg-muted">{shownBranch}</span>}
+      {shownBranch && <span className="min-w-0 truncate text-fg-muted">{shownBranch}</span>}
       {shownPath && <span className="min-w-0 truncate">{shownPath}</span>}
     </span>
   );
