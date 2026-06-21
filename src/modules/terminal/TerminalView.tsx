@@ -2,7 +2,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
-import { createTerminal, type TerminalHandle } from "./lib/createTerminal";
+import { createTerminal, enableWebglRenderer, type TerminalHandle } from "./lib/createTerminal";
 import { openPty, type PtySession } from "./lib/pty-bridge";
 import {
   deleteTerminalHistory,
@@ -137,6 +137,10 @@ export function TerminalView({
     handleRef.current = handle;
     const { term, fit } = handle;
     term.open(container);
+    // Opt into GPU rendering now that the canvas is mounted. Falls back to the
+    // DOM renderer on its own if WebGL is unavailable; term.dispose() (cleanup
+    // below) tears the addon down with the terminal.
+    enableWebglRenderer(term);
 
     // The session-status hook (see claude_status_hook) emits OSC 6973 on this
     // pane's tty when Claude changes state. Capture it here, where we know the

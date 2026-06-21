@@ -2,6 +2,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { buildTerminalFontFamily } from "@/modules/fonts/lib/fontChain";
 import { isWebUrl } from "@/lib/url";
@@ -75,4 +76,27 @@ export function createTerminal(options: CreateTerminalOptions = {}): TerminalHan
   term.unicode.activeVersion = "11";
 
   return { term, fit };
+}
+
+/**
+ * Switch the terminal to the WebGL (GPU-accelerated) renderer. Must run after
+ * `term.open()`, because the addon needs the terminal's mounted canvas.
+ *
+ * WebGL can be unavailable or fail mid-session: no GPU / headless environment,
+ * a blocked context, or the OS reclaiming the context on sleep/wake. In every
+ * failure case we drop back to xterm's default DOM renderer so the terminal
+ * keeps working rather than going blank. Returns the addon while it is active
+ * (so the caller may dispose it), or `null` when we fell back to DOM.
+ */
+export function enableWebglRenderer(term: Terminal): WebglAddon | null {
+  try {
+    const addon = new WebglAddon();
+    // A lost GPU context leaves a blank canvas; dispose the addon so xterm
+    // reattaches its DOM renderer.
+    addon.onContextLoss(() => addon.dispose());
+    term.loadAddon(addon);
+    return addon;
+  } catch {
+    return null;
+  }
 }
