@@ -70,13 +70,15 @@
     "status": {
       "active": "Running",
       "thinking": "Thinking",
-      "idle": "Needs Input"
+      "idle": "Needs Input",
+      "waiting-approval": "Needs Approval"
     },
     "filter": {
       "all": "All",
       "active": "Running",
       "idle": "Needs Input",
-      "thinking": "Thinking"
+      "thinking": "Thinking",
+      "waiting-approval": "Needs Approval"
     }
   }
 }

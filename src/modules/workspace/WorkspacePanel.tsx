@@ -18,8 +18,9 @@ import {
 } from "lucide-react";
 import { useTabsStore, type Tab, type TabKind } from "@/stores/tabsStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { useProgressStore } from "@/modules/claude-progress/lib/progressStore";
-import { deriveStatus } from "@/modules/claude-progress/lib/progressState";
+import { useSessionStatusStore } from "@/modules/claude-progress/lib/sessionStatusStore";
+import type { SessionStatus } from "@/modules/claude-progress/lib/sessionStatus";
+import { tabSessionStatus } from "./lib/tabSessionStatus";
 import { deriveTabCwd } from "./lib/tabCwd";
 import { selectCardTitle } from "./lib/cardTitle";
 import { useWorktreeStore } from "./lib/worktreeStore";
@@ -48,27 +49,18 @@ function tabIcon(kind: TabKind): LucideIcon {
   }
 }
 
-type ClaudeStatus = ReturnType<typeof deriveStatus>;
-type StatusFilter = "all" | ClaudeStatus;
+type StatusFilter = "all" | SessionStatus;
 
-const FILTERS: StatusFilter[] = ["all", "active", "idle", "thinking"];
+const FILTERS: StatusFilter[] = ["all", "active", "idle", "thinking", "waiting-approval"];
 
-type Sessions = ReturnType<typeof useProgressStore.getState>["sessions"];
-
-/** The Claude status for a tab's representative cwd, or null when no session. */
-function tabClaudeStatus(tab: Tab, sessions: Sessions): ClaudeStatus | null {
-  const cwd = deriveTabCwd(tab);
-  const progress = cwd ? sessions[cwd] : undefined;
-  return progress ? deriveStatus(progress) : null;
-}
-
-const STATUS_STYLE: Record<ClaudeStatus, string> = {
+const STATUS_STYLE: Record<SessionStatus, string> = {
   active: "bg-accent/15 text-accent",
   thinking: "bg-bg-elevated text-fg-muted",
+  "waiting-approval": "bg-danger/15 text-danger",
   idle: "bg-warning/15 text-warning",
 };
 
-function StatusBadge({ status }: { status: ClaudeStatus }) {
+function StatusBadge({ status }: { status: SessionStatus }) {
   const { t } = useTranslation();
   return (
     <span
@@ -167,14 +159,14 @@ function PrBadge({ pr }: { pr: PrInfo }) {
 function TabCard({ tab }: { tab: Tab }) {
   const activeId = useTabsStore((s) => s.activeId);
   const setActive = useTabsStore((s) => s.setActive);
-  const sessions = useProgressStore((s) => s.sessions);
+  const statuses = useSessionStatusStore((s) => s.statuses);
   const infos = useWorktreeStore((s) => s.infos);
   const titles = useTitlesStore((s) => s.titles);
   const prs = usePrStore((s) => s.prs);
   const card = useSettingsStore((s) => s.workspaceCard);
   const active = tab.id === activeId;
   const cwd = deriveTabCwd(tab);
-  const status = tabClaudeStatus(tab, sessions);
+  const status = tabSessionStatus(tab, statuses);
   const info = cwd ? infos[cwd] : undefined;
   const title = selectCardTitle(tab, titles);
   const pr = cwd ? prs[cwd] : undefined;
@@ -209,7 +201,7 @@ function TabCard({ tab }: { tab: Tab }) {
 
 function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: StatusFilter }) {
   const { t } = useTranslation();
-  const sessions = useProgressStore((s) => s.sessions);
+  const statuses = useSessionStatusStore((s) => s.statuses);
   const setActiveSpace = useTabsStore((s) => s.setActiveSpace);
   const renameSpace = useTabsStore((s) => s.renameSpace);
   const deleteSpace = useTabsStore((s) => s.deleteSpace);
@@ -218,7 +210,7 @@ function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: St
   const [draft, setDraft] = useState("");
   const tabs = useTabsStore((s) => s.tabs)
     .filter((t) => t.spaceId === id)
-    .filter((t) => filter === "all" || tabClaudeStatus(t, sessions) === filter);
+    .filter((t) => filter === "all" || tabSessionStatus(t, statuses) === filter);
 
   // Under an active filter a group with no matching cards adds only noise.
   if (filter !== "all" && tabs.length === 0) {

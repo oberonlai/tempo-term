@@ -4,19 +4,14 @@ import "@/i18n";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { useTabsStore } from "@/stores/tabsStore";
 import { leaf } from "@/modules/terminal/lib/terminalLayout";
-import { useProgressStore } from "@/modules/claude-progress/lib/progressStore";
-import { emptyProgressState, reduceProgress } from "@/modules/claude-progress/lib/progressState";
+import { useSessionStatusStore } from "@/modules/claude-progress/lib/sessionStatusStore";
 import { useWorktreeStore } from "./lib/worktreeStore";
 import { useTitlesStore } from "./lib/titlesStore";
 import { usePrStore } from "./lib/prStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 
-function activeSession() {
-  return reduceProgress(emptyProgressState(), { kind: "tool:start", id: "t1", name: "Bash" });
-}
-
 beforeEach(() => {
-  useProgressStore.setState({ sessions: {} });
+  useSessionStatusStore.setState({ statuses: {} });
   useWorktreeStore.setState({ infos: {} });
   useTitlesStore.setState({ titles: {} });
   usePrStore.setState({ prs: {}, fetchedAt: {} });
@@ -86,7 +81,7 @@ describe("WorkspacePanel", () => {
   });
 
   it("shows a Claude status badge on a card whose cwd has a running session", () => {
-    useProgressStore.setState({ sessions: { "/a": activeSession() } });
+    useSessionStatusStore.setState({ statuses: { p1: "active" } });
     render(<WorkspacePanel />);
     const card = screen.getByRole("button", { name: /alpha/ });
     expect(within(card).getByText("Running")).toBeInTheDocument();
@@ -100,7 +95,7 @@ describe("WorkspacePanel", () => {
   });
 
   it("filters cards to only running sessions", () => {
-    useProgressStore.setState({ sessions: { "/a": activeSession() } });
+    useSessionStatusStore.setState({ statuses: { p1: "active" } });
     render(<WorkspacePanel />);
     fireEvent.click(screen.getByRole("button", { name: "Running" }));
     expect(screen.getByText("alpha")).toBeInTheDocument();
@@ -108,7 +103,7 @@ describe("WorkspacePanel", () => {
   });
 
   it("shows all cards again when the filter is reset to All", () => {
-    useProgressStore.setState({ sessions: { "/a": activeSession() } });
+    useSessionStatusStore.setState({ statuses: { p1: "active" } });
     render(<WorkspacePanel />);
     fireEvent.click(screen.getByRole("button", { name: "Running" }));
     fireEvent.click(screen.getByRole("button", { name: "All" }));
@@ -163,7 +158,7 @@ describe("WorkspacePanel", () => {
   });
 
   it("hides the status badge when the status block is disabled", () => {
-    useProgressStore.setState({ sessions: { "/a": activeSession() } });
+    useSessionStatusStore.setState({ statuses: { p1: "active" } });
     useSettingsStore.setState({
       workspaceCard: { status: false, branch: true, cwd: true, pr: true },
     });
