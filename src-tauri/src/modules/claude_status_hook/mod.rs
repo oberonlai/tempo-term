@@ -3,7 +3,12 @@
 //! entries in `~/.claude/settings.json` is a pure function over the parsed JSON
 //! so it can be tested without touching the filesystem.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
+use tauri::{AppHandle, Manager};
+
+use crate::modules::claude_progress::config_base_dir;
 
 /// The hook script body, embedded so install can write it to disk.
 pub const HOOK_SCRIPT: &str = include_str!("status-hook.sh");
@@ -84,6 +89,66 @@ pub fn remove_hook_settings(mut existing: Value, script_path: &str) -> Value {
         hooks.remove(&key);
     }
     existing
+}
+
+/// `~/.claude` (or the CLAUDE_CONFIG_DIR override), the script path under it,
+/// and the settings.json path. Shared by install and uninstall.
+fn paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let env_value = std::env::var("CLAUDE_CONFIG_DIR").ok();
+    let base = config_base_dir(&home, env_value.as_deref());
+    let script_path = base.join("tempoterm").join("status-hook.sh");
+    let settings_path = base.join("settings.json");
+    Ok((script_path, settings_path))
+}
+
+/// Read and parse settings.json, treating a missing file as `{}`. A malformed
+/// existing file is an error so we never clobber it.
+fn read_settings(settings_path: &PathBuf) -> Result<Value, String> {
+    match std::fs::read_to_string(settings_path) {
+        Ok(text) if text.trim().is_empty() => Ok(json!({})),
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("settings.json is not valid JSON: {e}")),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn write_settings(settings_path: &PathBuf, value: &Value) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    std::fs::write(settings_path, text + "\n").map_err(|e| e.to_string())
+}
+
+/// Write the hook script and register its entries in settings.json. Idempotent.
+#[tauri::command]
+pub fn claude_status_hook_install(app: AppHandle) -> Result<(), String> {
+    let (script_path, settings_path) = paths(&app)?;
+    if let Some(dir) = script_path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&script_path, HOOK_SCRIPT).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
+    }
+    let script_str = script_path.to_str().ok_or("script path is not valid UTF-8")?;
+    let merged = merge_hook_settings(read_settings(&settings_path)?, script_str);
+    write_settings(&settings_path, &merged)
+}
+
+/// Remove our settings.json entries and delete the hook script.
+#[tauri::command]
+pub fn claude_status_hook_uninstall(app: AppHandle) -> Result<(), String> {
+    let (script_path, settings_path) = paths(&app)?;
+    let script_str = script_path.to_str().ok_or("script path is not valid UTF-8")?;
+    let cleaned = remove_hook_settings(read_settings(&settings_path)?, script_str);
+    write_settings(&settings_path, &cleaned)?;
+    let _ = std::fs::remove_file(&script_path);
+    if let Some(dir) = script_path.parent() {
+        let _ = std::fs::remove_dir(dir); // best-effort, only succeeds when empty
+    }
+    Ok(())
 }
 
 #[cfg(test)]
