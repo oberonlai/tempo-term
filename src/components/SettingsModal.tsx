@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { SettingsView } from "@/modules/settings/SettingsView";
@@ -6,13 +7,37 @@ import { useUiStore } from "@/stores/uiStore";
 export function SettingsModal() {
   const { t } = useTranslation();
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const close = () => setSettingsOpen(false);
+
+  // Esc closes the modal, matching the other dialogs in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        close();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
+    <div
+      // Clicking the dimmed area beside the panel dismisses it; clicks that
+      // originate inside the panel bubble up here with a different target, so
+      // guard on currentTarget to leave those alone.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          close();
+        }
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+    >
       <div className="relative flex h-[80vh] w-full max-w-4xl overflow-hidden rounded-xl border border-border-strong bg-bg shadow-2xl">
         <button
           type="button"
           aria-label={t("actions.cancel")}
-          onClick={() => setSettingsOpen(false)}
+          onClick={close}
           className="absolute right-3 top-3 z-10 rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
         >
           <X size={18} />
