@@ -39,6 +39,8 @@ interface SettingsState {
   workspaceCard: WorkspaceCardBlocks;
   /** Where workspace cards source PR data. */
   prSource: WorkspacePrSource;
+  /** Install the Claude Code hook that reports live session status to cards. */
+  claudeStatusTracking: boolean;
   setLanguage: (language: SupportedLanguage) => void;
   setThemeId: (themeId: string) => void;
   setTerminalPadding: (padding: number) => void;
@@ -47,6 +49,7 @@ interface SettingsState {
   setNotesFolderPath: (path: string | null) => void;
   setWorkspaceCardBlock: (key: keyof WorkspaceCardBlocks, value: boolean) => void;
   setPrSource: (source: WorkspacePrSource) => void;
+  setClaudeStatusTracking: (value: boolean) => void;
 }
 
 export const SETTINGS_STORAGE_KEY = "tempoterm-settings";
@@ -69,6 +72,7 @@ export const useSettingsStore = create<SettingsState>()(
       notesFolderPath: null,
       workspaceCard: DEFAULT_WORKSPACE_CARD,
       prSource: "auto",
+      claudeStatusTracking: true,
       setLanguage: (language) => set({ language }),
       setThemeId: (themeId) => set({ themeId }),
       setTerminalPadding: (padding) => set({ terminalPadding: clampPadding(padding) }),
@@ -78,6 +82,7 @@ export const useSettingsStore = create<SettingsState>()(
       setWorkspaceCardBlock: (key, value) =>
         set((state) => ({ workspaceCard: { ...state.workspaceCard, [key]: value } })),
       setPrSource: (prSource) => set({ prSource }),
+      setClaudeStatusTracking: (value) => set({ claudeStatusTracking: value }),
     }),
     {
       name: SETTINGS_STORAGE_KEY,

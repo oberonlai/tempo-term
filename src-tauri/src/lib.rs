@@ -11,6 +11,7 @@ use modules::ai::ai_chat;
 use modules::claude_progress::{
     claude_progress_unwatch, claude_progress_watch, claude_session_title, ClaudeProgressState,
 };
+use modules::claude_status_hook::{claude_status_hook_install, claude_status_hook_uninstall};
 use modules::notes::{notes_unwatch, notes_watch, NotesWatchState};
 use modules::clipboard::{
     terminal_clipboard_image_paths, terminal_clipboard_paths, terminal_clipboard_text,
@@ -158,6 +159,8 @@ pub fn run() {
             claude_progress_watch,
             claude_progress_unwatch,
             claude_session_title,
+            claude_status_hook_install,
+            claude_status_hook_uninstall,
             notes_watch,
             notes_unwatch
         ])

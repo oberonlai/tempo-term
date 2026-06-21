@@ -184,7 +184,7 @@ fn mangle_cwd(cwd: &str) -> String {
 /// `CLAUDE_CONFIG_DIR` override when set and non-empty, otherwise `~/.claude`.
 /// A leading `~` in the override is expanded against `home`; shells usually
 /// expand it first, but a literal `~` can still reach us from a config file.
-fn config_base_dir(home: &Path, env_value: Option<&str>) -> PathBuf {
+pub fn config_base_dir(home: &Path, env_value: Option<&str>) -> PathBuf {
     match env_value {
         Some(value) if !value.trim().is_empty() => {
             let path = Path::new(value);

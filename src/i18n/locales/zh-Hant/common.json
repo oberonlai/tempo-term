@@ -70,13 +70,15 @@
     "status": {
       "active": "執行中",
       "thinking": "思考中",
-      "idle": "等待輸入"
+      "idle": "等待輸入",
+      "waiting-approval": "等待批准"
     },
     "filter": {
       "all": "全部",
       "active": "執行中",
       "idle": "等待輸入",
-      "thinking": "思考中"
+      "thinking": "思考中",
+      "waiting-approval": "等待批准"
     }
   }
 }

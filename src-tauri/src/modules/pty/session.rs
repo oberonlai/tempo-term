@@ -75,6 +75,10 @@ fn build_shell_command(cwd: Option<String>) -> (CommandBuilder, String) {
     for (key, value) in locale_env {
         cmd.env(key, value);
     }
+    // Marks this shell (and anything it launches, like Claude Code) as running
+    // inside tempo-term. The session-status hook only emits when it sees this,
+    // so Claude sessions in other terminals never touch our UI.
+    cmd.env("TEMPOTERM", "1");
 
     let shell_name = Path::new(&shell)
         .file_name()

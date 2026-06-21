@@ -8,6 +8,7 @@ import {
 } from "@/stores/settingsStore";
 import { ghAvailable } from "@/modules/workspace/lib/prBridge";
 import { secretsDeleteKey, secretsHasKey, secretsSetKey } from "@/modules/ai/lib/aiBridge";
+import { installStatusHook, uninstallStatusHook } from "@/modules/claude-progress/lib/statusHookBridge";
 
 /** Keychain account the GitHub API token is stored under (matches the backend). */
 const GITHUB_PROVIDER = "github";
@@ -92,7 +93,20 @@ export function WorkspaceSettingsSection() {
   const setBlock = useSettingsStore((s) => s.setWorkspaceCardBlock);
   const prSource = useSettingsStore((s) => s.prSource);
   const setPrSource = useSettingsStore((s) => s.setPrSource);
+  const statusTracking = useSettingsStore((s) => s.claudeStatusTracking);
+  const setStatusTracking = useSettingsStore((s) => s.setClaudeStatusTracking);
   const [ghReady, setGhReady] = useState<boolean | null>(null);
+
+  async function toggleStatusTracking(checked: boolean) {
+    setStatusTracking(checked);
+    try {
+      await (checked ? installStatusHook() : uninstallStatusHook());
+    } catch {
+      // Keep the toggle in sync with the real system state: if install or
+      // uninstall failed, the hook is in the opposite state from what we set.
+      setStatusTracking(!checked);
+    }
+  }
 
   useEffect(() => {
     ghAvailable()
@@ -121,6 +135,20 @@ export function WorkspaceSettingsSection() {
           </label>
         ))}
       </div>
+
+      <label className="mb-1 block text-sm font-medium text-fg">
+        {t("workspace.statusTrackingTitle")}
+      </label>
+      <p className="mb-2 text-xs text-fg-muted">{t("workspace.statusTrackingDescription")}</p>
+      <label className="mb-6 flex items-center gap-2 text-sm text-fg">
+        <input
+          type="checkbox"
+          checked={statusTracking}
+          onChange={(e) => void toggleStatusTracking(e.target.checked)}
+          className="h-4 w-4 accent-accent"
+        />
+        {t("workspace.statusTrackingLabel")}
+      </label>
 
       <label className="mb-1 block text-sm font-medium text-fg">{t("workspace.prTitle")}</label>
       <p className="mb-2 text-xs text-fg-muted">{t("workspace.prDescription")}</p>

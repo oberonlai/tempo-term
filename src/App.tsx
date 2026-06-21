@@ -17,6 +17,7 @@ import { applyTheme, getTheme } from "@/themes/themes";
 import { listen } from "@tauri-apps/api/event";
 import { useProgressStore } from "@/modules/claude-progress/lib/progressStore";
 import { useWatchSessions } from "@/modules/claude-progress/lib/useWatchSessions";
+import { installStatusHook } from "@/modules/claude-progress/lib/statusHookBridge";
 import { useWatchNotes } from "@/modules/notes/lib/useWatchNotes";
 
 const MIN_SIDEBAR = 180;
@@ -48,6 +49,14 @@ function App() {
   useEffect(() => {
     const keep = useTabsStore.getState().tabs.flatMap((t) => leafIds(t.paneTree));
     void pruneTerminalHistory(keep).catch(() => {});
+  }, []);
+
+  // Keep the Claude session-status hook installed when tracking is enabled, so
+  // workspace cards reflect the live CLI. Idempotent; a failure retries next launch.
+  useEffect(() => {
+    if (useSettingsStore.getState().claudeStatusTracking) {
+      void installStatusHook().catch(() => {});
+    }
   }, []);
 
   // Quietly check for a new release a few seconds after launch; the prompt only
