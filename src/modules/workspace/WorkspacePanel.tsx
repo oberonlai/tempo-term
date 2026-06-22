@@ -173,7 +173,8 @@ function PrBadge({ pr }: { pr: PrInfo }) {
 
 /** The last path segment of a cwd, used when a session has no transcript title yet. */
 function basename(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  // Split on both separators so Windows paths (C:\...) basename correctly too.
+  const parts = path.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 

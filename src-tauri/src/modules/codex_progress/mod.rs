@@ -51,13 +51,18 @@ pub fn parse_session_meta_cwd(first_line: &str) -> Option<String> {
 /// Longest session title we keep; longer text is truncated for display.
 const MAX_TITLE_CHARS: usize = 80;
 
-/// Derive a title for a Codex session from its rollout JSONL: the first
-/// `user_message` event's text, trimmed and truncated. The session opens with
-/// injected `response_item` context (environment, instructions); the user's own
-/// first turn arrives as an `event_msg`/`user_message`, so that is what we use.
-/// Returns None when the rollout has no user message yet.
-pub fn extract_codex_title(contents: &str) -> Option<String> {
-    for line in contents.lines() {
+/// Derive a title for a Codex session from a reader over its rollout JSONL: the
+/// first `user_message` event's text, trimmed and truncated. The session opens
+/// with injected `response_item` context (environment, instructions); the user's
+/// own first turn arrives as an `event_msg`/`user_message`, so that is what we
+/// use. Reads lazily and stops at the first match, so a long rollout is not fully
+/// loaded. Returns None when the rollout has no user message yet.
+pub fn extract_codex_title<R: BufRead>(reader: R) -> Option<String> {
+    for line in reader.lines() {
+        let line = match line {
+            Ok(line) => line,
+            Err(_) => continue,
+        };
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -300,8 +305,8 @@ pub fn codex_session_title(app: AppHandle, cwd: String) -> Option<String> {
     let base = codex_sessions_base(&home);
     let candidates = scan_recent_rollouts(&base, &recent_days());
     let path = select_newest_for_cwd(&candidates, &cwd)?;
-    let contents = std::fs::read_to_string(path).ok()?;
-    extract_codex_title(&contents)
+    let file = File::open(path).ok()?;
+    extract_codex_title(BufReader::new(file))
 }
 
 #[cfg(test)]
@@ -374,7 +379,7 @@ mod tests {
             "\n",
             r#"{"type":"event_msg","payload":{"type":"user_message","message":"a later message"}}"#,
         );
-        assert_eq!(extract_codex_title(contents).as_deref(), Some("Fix the flaky test"));
+        assert_eq!(extract_codex_title(contents.as_bytes()).as_deref(), Some("Fix the flaky test"));
     }
 
     #[test]
@@ -384,6 +389,6 @@ mod tests {
             "\n",
             r#"{"type":"event_msg","payload":{"type":"task_started"}}"#,
         );
-        assert_eq!(extract_codex_title(contents), None);
+        assert_eq!(extract_codex_title(contents.as_bytes()), None);
     }
 }
