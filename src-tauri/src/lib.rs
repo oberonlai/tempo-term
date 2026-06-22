@@ -11,7 +11,9 @@ use modules::ai::ai_chat;
 use modules::claude_progress::{
     claude_progress_unwatch, claude_progress_watch, claude_session_title, ClaudeProgressState,
 };
+use modules::codex_progress::CodexProgressState;
 use modules::claude_status_hook::{claude_status_hook_install, claude_status_hook_uninstall};
+use modules::codex_status_hook::{codex_status_hook_install, codex_status_hook_uninstall};
 use modules::notes::{notes_unwatch, notes_watch, NotesWatchState};
 use modules::clipboard::{
     terminal_clipboard_image_paths, terminal_clipboard_paths, terminal_clipboard_text,
@@ -72,6 +74,7 @@ pub fn run() {
         )
         .manage(PtyState::new())
         .manage(ClaudeProgressState::new())
+        .manage(CodexProgressState::new())
         .manage(NotesWatchState::new())
         .setup(|app| {
             // window-state restores the last size/position, but it can persist a
@@ -162,6 +165,8 @@ pub fn run() {
             claude_session_title,
             claude_status_hook_install,
             claude_status_hook_uninstall,
+            codex_status_hook_install,
+            codex_status_hook_uninstall,
             notes_watch,
             notes_unwatch
         ])

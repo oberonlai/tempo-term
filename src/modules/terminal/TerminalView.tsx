@@ -42,7 +42,7 @@ import { fsHomeDir, fsReadFile } from "@/modules/explorer/lib/fsBridge";
 import { getDraggedEntry } from "@/modules/explorer/lib/dragEntry";
 import {
   STATUS_OSC_CODE,
-  isClaudeForeground,
+  isTrackedAgentForeground,
   parseStatusOsc,
 } from "@/modules/claude-progress/lib/sessionStatus";
 import { useSessionStatusStore } from "@/modules/claude-progress/lib/sessionStatusStore";
@@ -607,13 +607,13 @@ export function TerminalView({
           last = dir;
           useWorkspaceStore.getState().setRoot(dir);
         }
-        // Crash backstop: if this pane still shows a Claude status but Claude is
-        // no longer the foreground process, SessionEnd never arrived (e.g. a
-        // hard kill), so the OSC never cleared it. Clear it here.
+        // Crash backstop: if this pane still shows a status but no tracked agent
+        // (Claude or Codex) is the foreground process, SessionEnd never arrived
+        // (e.g. a hard kill), so the OSC never cleared it. Clear it here.
         const leaf = leafIdRef.current;
         if (leaf && useSessionStatusStore.getState().statuses[leaf]) {
           const command = await session.foregroundCommand().catch(() => null);
-          if (!cancelled && !isClaudeForeground(command)) {
+          if (!cancelled && !isTrackedAgentForeground(command)) {
             useSessionStatusStore.getState().clear(leaf);
           }
         }

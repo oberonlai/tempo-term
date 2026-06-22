@@ -31,6 +31,8 @@ import { usePrStore } from "./lib/prStore";
 import { useWorkspacePrs } from "./lib/useWorkspacePrs";
 import type { WorktreeInfo } from "./lib/worktreeBridge";
 import type { PrInfo } from "./lib/prBridge";
+import { useProgressStore } from "@/modules/claude-progress/lib/progressStore";
+import { agentLabel } from "./lib/agentLabel";
 
 function tabIcon(kind: TabKind): LucideIcon {
   switch (kind) {
@@ -176,6 +178,7 @@ function TabCard({ tab }: { tab: Tab }) {
   const titles = useTitlesStore((s) => s.titles);
   const prs = usePrStore((s) => s.prs);
   const card = useSettingsStore((s) => s.workspaceCard);
+  const progressAgents = useProgressStore((s) => s.agents);
   const active = tab.id === activeId;
   const cwd = deriveTabCwd(tab);
   const status = tabSessionStatus(tab, statuses);
@@ -183,6 +186,7 @@ function TabCard({ tab }: { tab: Tab }) {
   const title = selectCardTitle(tab, titles);
   const pr = cwd ? prs[cwd] : undefined;
   const Icon = tabIcon(tab.kind);
+  const label = agentLabel(cwd ? progressAgents[cwd] : undefined);
 
   return (
     <button
@@ -199,6 +203,9 @@ function TabCard({ tab }: { tab: Tab }) {
         <span className="flex items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg">{title}</span>
           {card.status && status && <StatusBadge status={status} />}
+          {card.status && status && label && (
+            <span className="shrink-0 text-[11px] text-fg-subtle">{label}</span>
+          )}
         </span>
         <BranchBlock info={info} cwd={cwd} showBranch={card.branch} showCwd={card.cwd} />
         {card.pr && pr && (

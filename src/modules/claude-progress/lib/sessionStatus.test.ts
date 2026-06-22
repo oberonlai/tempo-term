@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isClaudeForeground, parseStatusOsc } from "./sessionStatus";
+import { isClaudeForeground, isCodexForeground, isTrackedAgentForeground, parseStatusOsc } from "./sessionStatus";
 
 describe("parseStatusOsc", () => {
   it("parses a status payload", () => {
@@ -80,5 +80,28 @@ describe("isClaudeForeground", () => {
   it("does not match claude only appearing as an argument", () => {
     expect(isClaudeForeground("vim claude.md")).toBe(false);
     expect(isClaudeForeground("cat claude.log")).toBe(false);
+  });
+});
+
+describe("isCodexForeground", () => {
+  it("matches the codex binary by name, path, and prefix runners", () => {
+    expect(isCodexForeground("codex")).toBe(true);
+    expect(isCodexForeground("/Users/me/.nvm/versions/node/v22.15.1/bin/codex")).toBe(true);
+    expect(isCodexForeground("node /opt/homebrew/lib/node_modules/@openai/codex/cli.js")).toBe(true);
+    expect(isCodexForeground("node /usr/local/lib/node_modules/openai-codex/cli.js")).toBe(true);
+    expect(isCodexForeground("npx codex")).toBe(true);
+  });
+  it("does not match a shell or codex as a mere argument", () => {
+    expect(isCodexForeground("zsh")).toBe(false);
+    expect(isCodexForeground("vim codex.md")).toBe(false);
+    expect(isCodexForeground(null)).toBe(false);
+  });
+});
+
+describe("isTrackedAgentForeground", () => {
+  it("is true for either claude or codex", () => {
+    expect(isTrackedAgentForeground("claude")).toBe(true);
+    expect(isTrackedAgentForeground("codex")).toBe(true);
+    expect(isTrackedAgentForeground("zsh")).toBe(false);
   });
 });

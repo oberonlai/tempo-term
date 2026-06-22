@@ -75,3 +75,26 @@ export function isClaudeForeground(cmd: string | null): boolean {
     /@anthropic-ai\/claude/i.test(trimmed)
   );
 }
+
+/**
+ * Whether a terminal's foreground command looks like Codex, used for the same
+ * crash backstop and to label which agent a pane runs. Matches the `codex`
+ * binary by name or path, behind a prefix runner, or the npm package's node
+ * command, but not codex appearing only as an argument.
+ */
+export function isCodexForeground(cmd: string | null): boolean {
+  if (!cmd) {
+    return false;
+  }
+  const trimmed = cmd.trim();
+  return (
+    /^(?:(?:sudo|npx|bunx|yarn\s+run)\s+)?(?:.*\/)?codex(?:\s|$)/i.test(trimmed) ||
+    /@openai\/codex\b/i.test(trimmed) ||
+    /\bopenai-codex\b/i.test(trimmed)
+  );
+}
+
+/** True when any agent tempo-term tracks is the foreground process. */
+export function isTrackedAgentForeground(cmd: string | null): boolean {
+  return isClaudeForeground(cmd) || isCodexForeground(cmd);
+}

@@ -17,7 +17,7 @@ import { applyTheme, getTheme } from "@/themes/themes";
 import { listen } from "@tauri-apps/api/event";
 import { useProgressStore } from "@/modules/claude-progress/lib/progressStore";
 import { useWatchSessions } from "@/modules/claude-progress/lib/useWatchSessions";
-import { installStatusHook } from "@/modules/claude-progress/lib/statusHookBridge";
+import { installStatusHook, installCodexStatusHook } from "@/modules/claude-progress/lib/statusHookBridge";
 import { useWatchNotes } from "@/modules/notes/lib/useWatchNotes";
 import { registerSecondaryWindowCleanup } from "@/lib/windowLifecycle";
 
@@ -69,6 +69,7 @@ function App() {
   useEffect(() => {
     if (useSettingsStore.getState().claudeStatusTracking) {
       void installStatusHook().catch(() => {});
+      void installCodexStatusHook().catch(() => {});
     }
   }, []);
 
@@ -86,11 +87,11 @@ function App() {
   useEffect(() => {
     // listen() rejects when there is no Tauri runtime (unit tests, web preview);
     // swallow it so it never surfaces as an unhandled rejection.
-    const unlisten = listen<{ cwd: string; lines: string[]; reset: boolean }>(
+    const unlisten = listen<{ cwd: string; agent: "claude" | "codex"; lines: string[]; reset: boolean }>(
       "claude-progress:lines",
       (event) => {
-        const { cwd, lines, reset } = event.payload;
-        useProgressStore.getState().pushLines(cwd, lines, reset);
+        const { cwd, agent, lines, reset } = event.payload;
+        useProgressStore.getState().pushLines(cwd, agent, lines, reset);
       },
     ).catch(() => undefined);
     return () => {

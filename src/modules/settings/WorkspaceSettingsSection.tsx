@@ -8,7 +8,12 @@ import {
 } from "@/stores/settingsStore";
 import { ghAvailable } from "@/modules/workspace/lib/prBridge";
 import { secretsDeleteKey, secretsHasKey, secretsSetKey } from "@/modules/ai/lib/aiBridge";
-import { installStatusHook, uninstallStatusHook } from "@/modules/claude-progress/lib/statusHookBridge";
+import {
+  installStatusHook,
+  uninstallStatusHook,
+  installCodexStatusHook,
+  uninstallCodexStatusHook,
+} from "@/modules/claude-progress/lib/statusHookBridge";
 
 /** Keychain account the GitHub API token is stored under (matches the backend). */
 const GITHUB_PROVIDER = "github";
@@ -100,7 +105,13 @@ export function WorkspaceSettingsSection() {
   async function toggleStatusTracking(checked: boolean) {
     setStatusTracking(checked);
     try {
-      await (checked ? installStatusHook() : uninstallStatusHook());
+      if (checked) {
+        await installStatusHook();
+        await installCodexStatusHook();
+      } else {
+        await uninstallStatusHook();
+        await uninstallCodexStatusHook();
+      }
     } catch {
       // Keep the toggle in sync with the real system state: if install or
       // uninstall failed, the hook is in the opposite state from what we set.
