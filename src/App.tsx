@@ -74,11 +74,11 @@ function App() {
   useEffect(() => {
     // listen() rejects when there is no Tauri runtime (unit tests, web preview);
     // swallow it so it never surfaces as an unhandled rejection.
-    const unlisten = listen<{ cwd: string; lines: string[]; reset: boolean }>(
+    const unlisten = listen<{ cwd: string; agent: "claude" | "codex"; lines: string[]; reset: boolean }>(
       "claude-progress:lines",
       (event) => {
-        const { cwd, lines, reset } = event.payload;
-        useProgressStore.getState().pushLines(cwd, "claude", lines, reset);
+        const { cwd, agent, lines, reset } = event.payload;
+        useProgressStore.getState().pushLines(cwd, agent, lines, reset);
       },
     ).catch(() => undefined);
     return () => {

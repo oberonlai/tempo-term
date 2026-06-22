@@ -85,6 +85,7 @@ const PROGRESS_EVENT: &str = "claude-progress:lines";
 #[derive(Clone, serde::Serialize)]
 struct ProgressBatch {
     cwd: String,
+    agent: String,
     lines: Vec<String>,
     /// True for the first batch of a newly started session, telling the frontend
     /// to clear this cwd's accumulated progress before applying these lines.
@@ -291,6 +292,7 @@ fn build_watcher(app: &AppHandle, dir: &Path, cwd: String) -> Result<Recommended
                 PROGRESS_EVENT,
                 ProgressBatch {
                     cwd: cwd.clone(),
+                    agent: "claude".into(),
                     lines,
                     reset,
                 },
@@ -328,16 +330,21 @@ impl Default for ClaudeProgressState {
 /// Sync the set of watched project directories to exactly `cwds`: keep existing
 /// watchers, drop ones no longer present, and start watching new ones. Directories
 /// with no transcript yet are simply skipped (no watcher until a session exists).
+/// Also (re)points the Codex watcher at the same cwd set.
 #[tauri::command]
 pub fn claude_progress_watch(
     app: AppHandle,
     state: State<ClaudeProgressState>,
+    codex: State<crate::modules::codex_progress::CodexProgressState>,
     cwds: Vec<String>,
 ) -> Result<(), String> {
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let env_value = std::env::var("CLAUDE_CONFIG_DIR").ok();
     let base = config_base_dir(&home, env_value.as_deref());
     let mut watchers = state.watchers.lock().unwrap();
+
+    // Drive the Codex watcher before the loop consumes `cwds`.
+    crate::modules::codex_progress::set_watched_cwds(&app, &codex, &cwds);
 
     watchers.retain(|cwd, _| cwds.contains(cwd));
 
