@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod claude_progress;
 pub mod claude_status_hook;
+pub mod codex_status_hook;
 pub mod clipboard;
 pub mod fonts;
 pub mod fs;
