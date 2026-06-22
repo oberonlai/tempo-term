@@ -47,6 +47,22 @@ describe("createCodexNormalizer", () => {
     ]);
   });
 
+  it("maps custom_tool_call update_plan to a todo event", () => {
+    const n = createCodexNormalizer();
+    const events = n.push(
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "update_plan",
+          call_id: "p2",
+          input: JSON.stringify({ plan: [{ step: "Deploy", status: "pending" }] }),
+        },
+      }),
+    );
+    expect(events).toEqual([{ kind: "todo", items: [{ text: "Deploy", status: "pending" }] }]);
+  });
+
   it("treats apply_patch custom_tool_call as a tool with a friendly name", () => {
     const n = createCodexNormalizer();
     const start = n.push(
