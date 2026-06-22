@@ -37,7 +37,7 @@ fn our_command(script_path: &str, state: &str) -> String {
 
 /// Add our hook entry to each event without disturbing the user's own hooks.
 /// Idempotent: re-running never duplicates our entries.
-pub fn merge_hook_settings(mut existing: Value, script_path: &str) -> Value {
+pub fn merge_hook_settings(mut existing: Value, script_path: &str, events: &[(&str, &str)]) -> Value {
     if !existing.is_object() {
         existing = json!({});
     }
@@ -47,7 +47,7 @@ pub fn merge_hook_settings(mut existing: Value, script_path: &str) -> Value {
         *hooks = json!({});
     }
     let hooks = hooks.as_object_mut().unwrap();
-    for (event, state) in EVENTS {
+    for (event, state) in events {
         let cmd = our_command(script_path, state);
         let arr = hooks.entry(*event).or_insert_with(|| json!([]));
         if !arr.is_array() {
@@ -68,11 +68,11 @@ pub fn merge_hook_settings(mut existing: Value, script_path: &str) -> Value {
 
 /// Remove only the entries whose command points at our script, then drop any
 /// event array we left empty. The user's other hooks are untouched.
-pub fn remove_hook_settings(mut existing: Value, script_path: &str) -> Value {
+pub fn remove_hook_settings(mut existing: Value, script_path: &str, events: &[(&str, &str)]) -> Value {
     let Some(hooks) = existing.get_mut("hooks").and_then(Value::as_object_mut) else {
         return existing;
     };
-    for (event, _) in EVENTS {
+    for (event, _) in events {
         if let Some(arr) = hooks.get_mut(*event).and_then(Value::as_array_mut) {
             arr.retain(|e| {
                 e["hooks"].as_array().is_none_or(|hs| {
@@ -162,8 +162,8 @@ pub fn claude_status_hook_install(app: AppHandle) -> Result<(), String> {
     // from older versions whose command arguments differed (e.g. Notification
     // used to pass "waiting-approval"); a plain merge would leave those stale
     // entries behind alongside the new ones.
-    let cleaned = remove_hook_settings(read_settings(&settings_path)?, script_str);
-    let merged = merge_hook_settings(cleaned, script_str);
+    let cleaned = remove_hook_settings(read_settings(&settings_path)?, script_str, EVENTS);
+    let merged = merge_hook_settings(cleaned, script_str, EVENTS);
     write_settings(&settings_path, &merged)
 }
 
@@ -175,7 +175,7 @@ pub fn claude_status_hook_uninstall(app: AppHandle) -> Result<(), String> {
     // Only rewrite settings.json if it already exists, so uninstalling never
     // creates an empty `{}` file for a user who has no settings.
     if settings_path.exists() {
-        let cleaned = remove_hook_settings(read_settings(&settings_path)?, script_str);
+        let cleaned = remove_hook_settings(read_settings(&settings_path)?, script_str, EVENTS);
         write_settings(&settings_path, &cleaned)?;
     }
     let _ = std::fs::remove_file(&script_path);
@@ -194,7 +194,7 @@ mod tests {
         let existing = json!({
             "hooks": { "PreToolUse": [{ "hooks": [{ "type": "command", "command": "user-thing" }] }] }
         });
-        let merged = merge_hook_settings(existing, "/p/status-hook.sh");
+        let merged = merge_hook_settings(existing, "/p/status-hook.sh", EVENTS);
         let pre = merged["hooks"]["PreToolUse"].as_array().unwrap();
         assert!(pre.iter().any(|e| e["hooks"][0]["command"] == "user-thing"));
         assert!(pre
@@ -212,8 +212,9 @@ mod tests {
                 "hooks": { "PreToolUse": [{ "hooks": [{ "type": "command", "command": "user-thing" }] }] }
             }),
             "/p/status-hook.sh",
+            EVENTS,
         );
-        let cleaned = remove_hook_settings(merged, "/p/status-hook.sh");
+        let cleaned = remove_hook_settings(merged, "/p/status-hook.sh", EVENTS);
         let pre = cleaned["hooks"]["PreToolUse"].as_array().unwrap();
         assert!(pre.iter().any(|e| e["hooks"][0]["command"] == "user-thing"));
         assert!(!pre.iter().any(|e| e["hooks"][0]["command"]
@@ -225,8 +226,8 @@ mod tests {
 
     #[test]
     fn merge_is_idempotent() {
-        let once = merge_hook_settings(json!({}), "/p/status-hook.sh");
-        let twice = merge_hook_settings(once.clone(), "/p/status-hook.sh");
+        let once = merge_hook_settings(json!({}), "/p/status-hook.sh", EVENTS);
+        let twice = merge_hook_settings(once.clone(), "/p/status-hook.sh", EVENTS);
         assert_eq!(once, twice);
     }
 
@@ -234,21 +235,21 @@ mod tests {
     fn remove_drops_the_hooks_key_when_it_becomes_empty() {
         // Settings whose only hooks are ours: after removal nothing is left, so
         // the whole "hooks" key should be gone rather than left as "hooks": {}.
-        let merged = merge_hook_settings(json!({}), "/p/status-hook.sh");
-        let cleaned = remove_hook_settings(merged, "/p/status-hook.sh");
+        let merged = merge_hook_settings(json!({}), "/p/status-hook.sh", EVENTS);
+        let cleaned = remove_hook_settings(merged, "/p/status-hook.sh", EVENTS);
         assert!(cleaned.get("hooks").is_none());
     }
 
     #[test]
     fn remove_on_settings_without_our_hooks_is_safe() {
         let other = json!({ "hooks": { "PreToolUse": [{ "hooks": [{ "type": "command", "command": "user" }] }] } });
-        let cleaned = remove_hook_settings(other.clone(), "/p/status-hook.sh");
+        let cleaned = remove_hook_settings(other.clone(), "/p/status-hook.sh", EVENTS);
         assert_eq!(cleaned, other);
     }
 
     #[test]
     fn merge_installs_notification_and_posttooluse_entries() {
-        let merged = merge_hook_settings(json!({}), "/p/status-hook.sh");
+        let merged = merge_hook_settings(json!({}), "/p/status-hook.sh", EVENTS);
         // Notification forwards its type via the "notification" sentinel, not a
         // hard-coded waiting-approval.
         let notif = merged["hooks"]["Notification"].as_array().unwrap();
@@ -275,7 +276,7 @@ mod tests {
             }
         });
         let migrated =
-            merge_hook_settings(remove_hook_settings(stale, "/p/status-hook.sh"), "/p/status-hook.sh");
+            merge_hook_settings(remove_hook_settings(stale, "/p/status-hook.sh", EVENTS), "/p/status-hook.sh", EVENTS);
         let notif = migrated["hooks"]["Notification"].as_array().unwrap();
         let commands: Vec<&str> = notif
             .iter()
