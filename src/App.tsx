@@ -77,7 +77,7 @@ function App() {
       "claude-progress:lines",
       (event) => {
         const { cwd, lines, reset } = event.payload;
-        useProgressStore.getState().pushLines(cwd, lines, reset);
+        useProgressStore.getState().pushLines(cwd, "claude", lines, reset);
       },
     ).catch(() => undefined);
     return () => {
