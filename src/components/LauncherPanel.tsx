@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Bot,
   FilePlus,
   FileText,
   FolderOpen,
   Globe,
   Server,
+  Sparkles,
   SquareTerminal,
   Waypoints,
   type LucideIcon,
@@ -16,6 +18,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { useNotesStore } from "@/stores/notesStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { pickNotesFolder } from "@/modules/notes/lib/pickNotesFolder";
+import { writeToTerminal } from "@/modules/terminal/lib/terminalBus";
 import { pickFile, pickFolder } from "@/lib/dialog";
 import { IS_MAC } from "@/lib/platform";
 import type { PaneContent } from "@/modules/terminal/lib/terminalLayout";
@@ -115,6 +118,26 @@ export function LauncherPanel({ target }: LauncherPanelProps) {
     }
   }
 
+  // Open a terminal and auto-run a CLI command in it (e.g. `claude`, `codex`).
+  // The command is queued via writeToTerminal until the freshly spawned shell
+  // registers, so it runs once the prompt is ready.
+  function openTerminalWithCommand(command: string) {
+    const line = command.endsWith("\n") ? command : `${command}\n`;
+    if (resolved.mode === "replacePane") {
+      setPaneContent(resolved.tabId, resolved.leafId, { kind: "terminal" });
+      writeToTerminal(resolved.leafId, line);
+      return;
+    }
+    const tabId = newTerminalTab(useWorkspaceStore.getState().rootPath ?? undefined);
+    const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId);
+    if (tab && tab.kind === "terminal") {
+      writeToTerminal(tab.activeLeafId, line);
+    }
+    if (resolved.closeTabId) {
+      closeTab(resolved.closeTabId);
+    }
+  }
+
   const showShortcuts = resolved.mode === "newTab";
 
   const groups: LauncherGroup[] = [
@@ -122,6 +145,18 @@ export function LauncherPanel({ target }: LauncherPanelProps) {
       key: "workspace",
       label: t("workspace.launcherGroup.workspace"),
       actions: [
+        {
+          key: "claude-code",
+          label: t("workspace.claudeCode"),
+          icon: Sparkles,
+          run: () => openTerminalWithCommand("claude"),
+        },
+        {
+          key: "codex",
+          label: t("workspace.codex"),
+          icon: Bot,
+          run: () => openTerminalWithCommand("codex"),
+        },
         {
           key: "terminal",
           label: t("workspace.terminal"),

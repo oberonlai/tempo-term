@@ -26,6 +26,11 @@
     "previous": "Find previous",
     "close": "Close search"
   },
+  "notify": {
+    "agentFallback": "Agent",
+    "needPermission": "{{agent}} needs permission",
+    "finished": "{{agent}} finished"
+  },
   "ssh": {
     "disconnected": "Disconnected — click to reconnect",
     "reconnect": "Reconnect"
@@ -162,6 +167,8 @@
     "note": "Note",
     "newTerminal": "New terminal",
     "connectSsh": "Connect SSH",
+    "claudeCode": "Claude Code",
+    "codex": "Codex",
     "launcherHint": "Choose what to open",
     "launcherGroup": {
       "workspace": "Workspace",

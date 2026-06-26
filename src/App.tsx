@@ -25,6 +25,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useProgressStore } from "@/modules/claude-progress/lib/progressStore";
 import { useWatchSessions } from "@/modules/claude-progress/lib/useWatchSessions";
 import { installStatusHook, installCodexStatusHook } from "@/modules/claude-progress/lib/statusHookBridge";
+import { installSessionNotifications } from "@/modules/claude-progress/lib/sessionNotifications";
+import { ensureNotificationPermission } from "@/modules/claude-progress/lib/notify";
 import { useWatchNotes } from "@/modules/notes/lib/useWatchNotes";
 import { registerSecondaryWindowCleanup } from "@/lib/windowLifecycle";
 import { SshPromptDialog } from "@/modules/ssh/SshPromptDialog";
@@ -136,6 +138,16 @@ function App() {
       void installStatusHook().catch(() => {});
       void installCodexStatusHook().catch(() => {});
     }
+  }, []);
+
+  // Raise a desktop notification when a tracked agent needs approval or finishes
+  // while the window is unfocused. Prime the OS permission up front so the first
+  // real notification isn't swallowed by a permission prompt.
+  useEffect(() => {
+    if (useSettingsStore.getState().claudeNotifications) {
+      void ensureNotificationPermission();
+    }
+    return installSessionNotifications();
   }, []);
 
   // Quietly check for a new release a few seconds after launch; the modal only
@@ -263,18 +275,21 @@ function App() {
             tabsState.closePaneOrTab();
           }
         } else {
-          // Closing the bottom-right pane (same selection as closePaneOrTab).
-          const target = panes.reduce((a, b) => {
-            if (b.rect.top !== a.rect.top) return b.rect.top > a.rect.top ? b : a;
-            return b.rect.left > a.rect.left ? b : a;
-          });
+          // Close the currently focused pane; fall back to the bottom-right
+          // pane if the active leaf is somehow stale.
+          const target =
+            panes.find((p) => p.id === tab.activeLeafId) ??
+            panes.reduce((a, b) => {
+              if (b.rect.top !== a.rect.top) return b.rect.top > a.rect.top ? b : a;
+              return b.rect.left > a.rect.left ? b : a;
+            });
           const targetBuf =
             target.content.kind === "editor" ? buffers[target.content.path] : undefined;
           const targetDirty = targetBuf ? targetBuf.content !== targetBuf.baseline : false;
           if (targetDirty) {
             setPendingCloseAction(() => () => tabsState.closePane(tab.id, target.id));
           } else {
-            tabsState.closePaneOrTab();
+            tabsState.closePane(tab.id, target.id);
           }
         }
       } else if (key === "p") {

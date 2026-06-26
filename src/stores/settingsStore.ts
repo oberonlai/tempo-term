@@ -46,6 +46,11 @@ interface SettingsState {
   prSource: WorkspacePrSource;
   /** Install the Claude Code hook that reports live session status to cards. */
   claudeStatusTracking: boolean;
+  /**
+   * Raise an OS desktop notification when a tracked agent needs approval or
+   * finishes, but only while the window is unfocused. Depends on status tracking.
+   */
+  claudeNotifications: boolean;
   /** Show AI ghost-text completions while typing in the code editor. */
   aiInlineCompletion: boolean;
   /** Include the active terminal's output in the AI assistant context by default. */
@@ -65,6 +70,7 @@ interface SettingsState {
   setWorkspaceCardBlock: (key: keyof WorkspaceCardBlocks, value: boolean) => void;
   setPrSource: (source: WorkspacePrSource) => void;
   setClaudeStatusTracking: (value: boolean) => void;
+  setClaudeNotifications: (value: boolean) => void;
   setAiInlineCompletion: (value: boolean) => void;
   setAiTerminalContext: (value: boolean) => void;
   setTerminalSuggestions: (value: boolean) => void;
@@ -106,6 +112,7 @@ export const useSettingsStore = create<SettingsState>()(
       workspaceCard: DEFAULT_WORKSPACE_CARD,
       prSource: "auto",
       claudeStatusTracking: true,
+      claudeNotifications: true,
       aiInlineCompletion: false,
       aiTerminalContext: true,
       terminalSuggestions: true,
@@ -121,6 +128,7 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ workspaceCard: { ...state.workspaceCard, [key]: value } })),
       setPrSource: (prSource) => set({ prSource }),
       setClaudeStatusTracking: (value) => set({ claudeStatusTracking: value }),
+      setClaudeNotifications: (value) => set({ claudeNotifications: value }),
       setAiInlineCompletion: (value) => set({ aiInlineCompletion: value }),
       setAiTerminalContext: (value) => set({ aiTerminalContext: value }),
       setTerminalSuggestions: (value) => set({ terminalSuggestions: value }),

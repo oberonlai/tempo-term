@@ -919,7 +919,11 @@ export function TerminalView({
       return;
     }
     let cancelled = false;
-    let last = "";
+    // Seed with the shell's starting dir so the mount-time setRoot (which fires
+    // with this same dir) does not echo a redundant `cd` back into the shell.
+    // Without this, a freshly opened pane that auto-runs a CLI (e.g. claude,
+    // codex) gets the `cd` typed into that program's prompt instead.
+    let last = cwdRef.current ?? "";
     const poll = async () => {
       const raw = sessionRef.current;
       const session = raw && isPtySession(raw) ? raw : null;
