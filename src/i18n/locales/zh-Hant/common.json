@@ -139,6 +139,8 @@
     "note": "筆記",
     "newTerminal": "新增終端機",
     "connectSsh": "SSH 連線",
+    "claudeCode": "Claude Code",
+    "codex": "Codex",
     "launcherHint": "選擇要開啟的內容",
     "launcherGroup": {
       "workspace": "工作區",
