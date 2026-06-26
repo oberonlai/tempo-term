@@ -58,6 +58,12 @@
     "ramTooltip": "RAM {{used}} / {{total}}",
     "netTooltip": "下載 {{rx}} · 上傳 {{tx}}"
   },
+  "titleBar": {
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "restore": "還原",
+    "close": "關閉"
+  },
   "actions": {
     "newTab": "新增分頁",
     "closeTab": "關閉分頁",

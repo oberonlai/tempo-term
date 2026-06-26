@@ -58,6 +58,12 @@
     "ramTooltip": "RAM {{used}} / {{total}}",
     "netTooltip": "Download {{rx}} · Upload {{tx}}"
   },
+  "titleBar": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
+  },
   "actions": {
     "newTab": "New Tab",
     "closeTab": "Close Tab",
