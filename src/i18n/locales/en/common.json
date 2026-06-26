@@ -3,6 +3,11 @@
   "tagline": "AI-powered terminal workspace",
   "terminalConnecting": "Starting shell…",
   "openLinkHint": "{{mods}}-click to open",
+  "notify": {
+    "agentFallback": "Agent",
+    "needPermission": "{{agent}} needs permission",
+    "finished": "{{agent}} finished"
+  },
   "ssh": {
     "disconnected": "Disconnected — click to reconnect",
     "reconnect": "Reconnect"
