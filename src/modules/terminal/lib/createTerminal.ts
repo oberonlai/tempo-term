@@ -112,11 +112,10 @@ export function enableWebglRenderer(term: Terminal): WebglAddon | null {
     // A lost GPU context leaves a blank canvas; dispose the addon so xterm
     // reattaches its DOM renderer.
     addon.onContextLoss(() => addon.dispose());
-    term.loadAddon(addon);
-    // Clear the glyph atlas just before it overflows, so long CJK-heavy sessions
-    // don't start rendering the wrong glyphs (see webglAtlasGuard). Run the
-    // guard's cleanup when the addon is disposed so its listener doesn't leak.
+    // Install guard BEFORE loadAddon so initialization-time page additions are
+    // counted toward the absolute total (see webglAtlasGuard).
     const disposeAtlasGuard = installAtlasPressureGuard(addon);
+    term.loadAddon(addon);
     const originalDispose = addon.dispose.bind(addon);
     addon.dispose = () => {
       disposeAtlasGuard();

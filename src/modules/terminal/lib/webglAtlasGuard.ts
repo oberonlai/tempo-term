@@ -16,29 +16,36 @@ import type { WebglAddon } from "@xterm/addon-webgl";
  * in place — it keeps the page objects and does NOT fire onRemoveTextureAtlasCanvas
  * (only merges/deletes do). After a clear the renderer re-rasterizes visible
  * glyphs into the now-empty existing pages WITHOUT creating new ones, so onAdd
- * goes quiet. The right pressure signal is therefore "pages added since the last
- * clear", reset to zero each time we clear — not a net page count (which a clear
- * doesn't reduce) and not onRemove (which a clear doesn't fire).
+ * goes quiet.
+ *
+ * The guard tracks the ABSOLUTE page count (not additions since the last clear).
+ * The earlier approach — resetting the counter to zero on each clear — was wrong:
+ * after clearing at `threshold` pages the atlas still holds those pages (just
+ * emptied), so only `max - threshold` more slots remain before overflow. With
+ * the reset-to-zero approach the guard waited for another full `threshold`
+ * additions before firing, by which time the atlas had already overflowed.
+ * Keeping the count accurate means the guard fires on the very next page that
+ * pushes the atlas past the threshold, which is what we want.
  */
 
 /** Hard ceilings from the WebGL renderer's atlas implementation. */
 const MAX_SUPPORTED_PAGES = 32;
-const SAFETY_MARGIN_PAGES = 2;
-const FALLBACK_THRESHOLD = 12;
+const SAFETY_MARGIN_PAGES = 4;
+const FALLBACK_THRESHOLD = 10;
 /** Minimum gap between two clears, so a pathological post-clear redraw can never
  *  spin into a clear loop that freezes the terminal. */
-const DEFAULT_COOLDOWN_MS = 1500;
+const DEFAULT_COOLDOWN_MS = 500;
 
 /**
  * Decides when to clear the atlas. Pure and synchronous (clock injected) so the
- * policy is unit-testable without a GPU: feed it the renderer's page-added
- * signal and it tells you when to clear.
+ * policy is unit-testable without a GPU: feed it the renderer's page-added and
+ * page-removed signals and it tells you when to clear.
  */
 export class AtlasPressureGuard {
-  /** New atlas pages created since the last clear (reset to 0 on each clear). */
-  private addsSinceClear = 0;
-  /** Timestamp of the last clear; 0 means we have never cleared. */
-  private lastClearAt = 0;
+  /** Absolute number of atlas pages currently allocated. */
+  private pageCount = 0;
+  /** Timestamp of the last clear; -1 means we have never cleared. */
+  private lastClearAt = -1;
 
   constructor(
     private readonly threshold: number,
@@ -47,20 +54,26 @@ export class AtlasPressureGuard {
   ) {}
 
   /** A new page was added to the atlas. Returns true when the atlas should be
-   *  cleared now: enough growth has happened since the last clear AND we are
-   *  past the cooldown. Resets the growth counter when it returns true. */
+   *  cleared now: the absolute page count has reached the threshold AND the
+   *  cooldown has elapsed. Does NOT reset the page count — pages stay allocated
+   *  after clearTextureAtlas(), so the count must stay accurate. */
   recordPageAdded(): boolean {
-    this.addsSinceClear += 1;
-    if (this.addsSinceClear < this.threshold) {
+    this.pageCount += 1;
+    if (this.pageCount < this.threshold) {
       return false;
     }
     const t = this.now();
-    if (this.lastClearAt !== 0 && t - this.lastClearAt < this.cooldownMs) {
+    if (this.lastClearAt >= 0 && t - this.lastClearAt < this.cooldownMs) {
       return false;
     }
     this.lastClearAt = t;
-    this.addsSinceClear = 0;
     return true;
+  }
+
+  /** A page was removed from the atlas (merge or shrink). Decrements the
+   *  absolute count so the guard doesn't fire prematurely after a merge. */
+  recordPageRemoved(): void {
+    this.pageCount = Math.max(0, this.pageCount - 1);
   }
 }
 
@@ -102,9 +115,9 @@ export function detectAtlasClearThreshold(fallback: number = FALLBACK_THRESHOLD)
 }
 
 /**
- * Wire an `AtlasPressureGuard` to a live `WebglAddon`: when atlas growth since
- * the last clear reaches the threshold, clear the atlas. Returns a disposer that
- * detaches the listener; the caller must run it when the addon is disposed.
+ * Wire an `AtlasPressureGuard` to a live `WebglAddon`: when the absolute atlas
+ * page count reaches the threshold, clear the atlas. Returns a disposer that
+ * detaches both listeners; the caller must run it when the addon is disposed.
  */
 export function installAtlasPressureGuard(
   addon: WebglAddon,
@@ -116,5 +129,11 @@ export function installAtlasPressureGuard(
       addon.clearTextureAtlas();
     }
   });
-  return () => added.dispose();
+  const removed = addon.onRemoveTextureAtlasCanvas(() => {
+    guard.recordPageRemoved();
+  });
+  return () => {
+    added.dispose();
+    removed.dispose();
+  };
 }
