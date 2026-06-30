@@ -51,10 +51,6 @@ pub struct SshOpenRequest {
     /// Defaults to an empty list when the field is absent.
     #[serde(default)]
     pub forwards: Vec<ForwardSpecInput>,
-    /// Tee this session's output to a per-session log file. Defaults to false
-    /// when the frontend omits it.
-    #[serde(default)]
-    pub log_enabled: bool,
 }
 
 #[tauri::command]

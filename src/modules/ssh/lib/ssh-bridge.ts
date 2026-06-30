@@ -1,7 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { toBytes } from "@/modules/terminal/lib/channelBytes";
 import type { SshAuthMethod } from "./parseSshCommand";
-import { useSettingsStore } from "@/stores/settingsStore";
 
 export interface SshSession {
   id: number;
@@ -49,7 +48,6 @@ export async function openSsh(opts: OpenSshOptions): Promise<SshSession> {
       cols: opts.cols,
       rows: opts.rows,
       forwards: opts.forwards ?? [],
-      logEnabled: useSettingsStore.getState().loggingEnabled,
     },
     onData,
     onExit,

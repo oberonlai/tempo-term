@@ -120,11 +120,11 @@ function App() {
   // editing a file) can reload it without closing and reopening the tab.
   useEffect(() => installEditorWatchSync(), []);
 
-  // Prune session logs older than the configured retention window once on
-  // startup so disk usage stays bounded without waiting for the panel to open.
+  // Prune session logs older than 30 days on startup so disk usage stays
+  // bounded without waiting for anything else to trigger the sweep.
   useEffect(() => {
     // Best-effort cleanup; a failure here must never surface as an unhandled rejection.
-    void enforceLogRetention(useSettingsStore.getState().logRetentionDays).catch(() => {});
+    void enforceLogRetention(30).catch(() => {});
   }, []);
 
   // In a secondary window, close this window's PTY sessions before it is

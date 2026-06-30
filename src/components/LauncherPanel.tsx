@@ -113,9 +113,6 @@ export function LauncherPanel({ target }: LauncherPanelProps) {
         break;
       case "launcher":
         break;
-      case "log":
-        // Log panes are opened via the Logs sidebar, not the launcher.
-        break;
     }
     if (resolved.closeTabId) {
       closeTab(resolved.closeTabId);

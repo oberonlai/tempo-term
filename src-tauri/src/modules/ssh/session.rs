@@ -295,13 +295,11 @@ async fn run_session(
 
     // Best-effort per-session logger; never let logging failures affect the
     // session. Dropping `log_tx` at the end of run_session writes the footer.
-    let log_tx = if req.log_enabled {
+    let log_tx = {
         let label = format!("{}@{}", req.user, req.host);
         crate::modules::session_log::start_logger(&app, &label)
             .ok()
             .map(|h| h.tx)
-    } else {
-        None
     };
 
     loop {

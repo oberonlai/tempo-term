@@ -12,7 +12,6 @@ import {
   LayoutGrid,
   Pencil,
   Plus,
-  ScrollText,
   SquareTerminal,
   Trash2,
   type LucideIcon,
@@ -54,8 +53,6 @@ function tabIcon(kind: TabKind): LucideIcon {
       return GitBranch;
     case "launcher":
       return LayoutGrid;
-    case "log":
-      return ScrollText;
   }
 }
 

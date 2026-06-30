@@ -45,10 +45,7 @@ use modules::terminal_history::{
     terminal_history_clear, terminal_history_delete, terminal_history_load,
     terminal_history_prune, terminal_history_save,
 };
-use modules::session_log::{
-    session_log_read, session_logs_dir_path, session_logs_enforce_retention, session_logs_list,
-    session_logs_open_dir,
-};
+use modules::session_log::session_logs_enforce_retention;
 use modules::sysmon::{system_stats, SysinfoState};
 use modules::ports::{kill_port_process, list_ports, PortsState};
 use modules::editor_watch::{editor_watch_set, EditorWatchState};
@@ -202,10 +199,6 @@ pub fn run() {
             terminal_history_delete,
             terminal_history_clear,
             terminal_history_prune,
-            session_logs_list,
-            session_log_read,
-            session_logs_dir_path,
-            session_logs_open_dir,
             session_logs_enforce_retention,
             claude_progress_watch,
             claude_progress_unwatch,

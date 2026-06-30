@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::time::UNIX_EPOCH;
 
-use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 const DIR_NAME: &str = "session-logs";
@@ -43,16 +42,6 @@ fn sanitize(label: &str) -> String {
 /// `<YYYYMMDD_HHMMSS>_<label>.log`
 fn log_filename(stamp: &str, label: &str) -> String {
     format!("{}_{}.log", stamp, sanitize(label))
-}
-
-/// A bare `.log` filename (no separators, no `..`) — the only thing
-/// `session_log_read` accepts, so a crafted name can't escape the logs dir.
-fn is_safe_log_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains('/')
-        && !name.contains('\\')
-        && !name.contains("..")
-        && name.ends_with(".log")
 }
 
 /// Names whose mtime is strictly older than `now_ms - retention_days`.
@@ -138,85 +127,6 @@ pub fn start_logger(app: &AppHandle, label: &str) -> Result<LoggerHandle, String
     start_logger_in(logs_dir(app)?, label)
 }
 
-#[derive(Debug, Serialize)]
-pub struct LogEntry {
-    pub name: String,
-    pub size: u64,
-    pub modified_unix_ms: i64,
-}
-
-/// List every `.log` in the logs dir, newest first.
-#[tauri::command]
-pub fn session_logs_list(app: AppHandle) -> Result<Vec<LogEntry>, String> {
-    let dir = logs_dir(&app)?;
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("log") {
-            continue;
-        }
-        let meta = match entry.metadata() {
-            Ok(m) if m.is_file() => m,
-            _ => continue,
-        };
-        let name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        let modified_unix_ms = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        entries.push(LogEntry { name, size: meta.len(), modified_unix_ms });
-    }
-    entries.sort_by(|a, b| b.modified_unix_ms.cmp(&a.modified_unix_ms));
-    Ok(entries)
-}
-
-/// Read one log by bare filename, guarded against path traversal.
-/// Returns raw binary via `tauri::ipc::Response` to avoid JSON serialization
-/// overhead (a JSON array of numbers is ~3× larger and much slower than raw bytes).
-#[tauri::command]
-pub fn session_log_read(app: AppHandle, name: String) -> Result<tauri::ipc::Response, String> {
-    if !is_safe_log_name(&name) {
-        return Err("invalid log name".into());
-    }
-    let dir = logs_dir(&app)?;
-    let path = dir.join(&name);
-    let canon_dir = fs::canonicalize(&dir).map_err(|e| e.to_string())?;
-    let canon_path = fs::canonicalize(&path).map_err(|e| e.to_string())?;
-    if !canon_path.starts_with(&canon_dir) {
-        return Err("path escapes logs directory".into());
-    }
-    let bytes = fs::read(&canon_path).map_err(|e| e.to_string())?;
-    Ok(tauri::ipc::Response::new(bytes))
-}
-
-#[tauri::command]
-pub fn session_logs_dir_path(app: AppHandle) -> Result<String, String> {
-    Ok(logs_dir(&app)?.to_string_lossy().into_owned())
-}
-
-/// Open the logs dir in the OS file manager.
-#[tauri::command]
-pub fn session_logs_open_dir(app: AppHandle) -> Result<(), String> {
-    let dir = logs_dir(&app)?;
-    ensure_logs_dir(&dir)?;
-    let status = if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(&dir).status()
-    } else if cfg!(target_os = "windows") {
-        std::process::Command::new("explorer").arg(&dir).status()
-    } else {
-        std::process::Command::new("xdg-open").arg(&dir).status()
-    };
-    status.map(|_| ()).map_err(|e| e.to_string())
-}
-
 /// Delete logs older than `retention_days`. `None` means keep forever (no-op).
 #[tauri::command]
 pub fn session_logs_enforce_retention(app: AppHandle, retention_days: Option<i64>) -> Result<(), String> {
@@ -276,16 +186,6 @@ mod tests {
     #[test]
     fn log_filename_is_stamp_underscore_label_dot_log() {
         assert_eq!(log_filename("20260507_143343", "rd2@10.0.217.54"), "20260507_143343_rd2_10.0.217.54.log");
-    }
-
-    #[test]
-    fn is_safe_log_name_rejects_traversal_and_non_log() {
-        assert!(is_safe_log_name("20260507_143343_zsh.log"));
-        assert!(!is_safe_log_name("../secret.log"));
-        assert!(!is_safe_log_name("a/b.log"));
-        assert!(!is_safe_log_name("a\\b.log"));
-        assert!(!is_safe_log_name("notes.txt"));
-        assert!(!is_safe_log_name(""));
     }
 
     #[test]

@@ -48,8 +48,7 @@
     "notes": "Notes",
     "gitGraph": "Git Graph",
     "settings": "Settings",
-    "connections": "Connections",
-    "logs": "Logs"
+    "connections": "Connections"
   },
   "statusBar": {
     "ready": "Ready",
@@ -190,18 +189,6 @@
       "destPort": "Destination port",
       "enabled": "Enabled"
     }
-  },
-  "logs": {
-    "title": "Logs",
-    "empty": "No log files yet",
-    "selectHint": "Select a log on the left",
-    "raw": "Raw (ANSI)",
-    "copy": "Copy",
-    "saveAs": "Save As…",
-    "loading": "Loading…",
-    "refresh": "Refresh",
-    "openFolder": "Open logs folder",
-    "error": "Error"
   },
   "workspace": {
     "openFolder": "Open Folder",

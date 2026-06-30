@@ -1,6 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { toBytes } from "@/modules/terminal/lib/channelBytes";
-import { useSettingsStore } from "@/stores/settingsStore";
 
 export interface PtySession {
   id: number;
@@ -53,7 +52,6 @@ export async function openPty(opts: OpenPtyOptions): Promise<PtySession> {
     cwd: opts.cwd,
     suggestions: opts.suggestions,
     shellOverride: opts.shellOverride,
-    logEnabled: useSettingsStore.getState().loggingEnabled,
     onData,
     onExit,
   });

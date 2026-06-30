@@ -156,8 +156,8 @@ pub fn spawn_with_sinks(
 }
 
 /// Spawn the user's shell and bridge its IO to the frontend over Tauri
-/// channels. When `log_enabled`, every output chunk is also tee'd into a
-/// per-session `.log` file via the session_log writer.
+/// channels. Every output chunk is also tee'd into a per-session `.log` file
+/// via the session_log writer.
 pub fn spawn(
     state: &PtyState,
     cols: u16,
@@ -166,7 +166,6 @@ pub fn spawn(
     suggestions: bool,
     shell_override: Option<String>,
     app: &tauri::AppHandle,
-    log_enabled: bool,
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<u32, String> {
@@ -174,13 +173,9 @@ pub fn spawn(
 
     // Best-effort per-session logger; failure to start logging must not block
     // opening the terminal, so we discard the error and just don't log.
-    let log_tx = if log_enabled {
-        crate::modules::session_log::start_logger(app, &shell_name)
-            .ok()
-            .map(|h| h.tx)
-    } else {
-        None
-    };
+    let log_tx = crate::modules::session_log::start_logger(app, &shell_name)
+        .ok()
+        .map(|h| h.tx);
 
     spawn_with_sinks(
         state,

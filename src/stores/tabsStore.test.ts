@@ -442,58 +442,6 @@ describe("openSshTab", () => {
   });
 });
 
-describe("openLogTab", () => {
-  beforeEach(reset);
-
-  it("creates a log tab with kind='log', correct title, and pane content on first call", () => {
-    const id = useTabsStore.getState().openLogTab("20260507_143343_zsh.log");
-    expect(useTabsStore.getState().activeId).toBe(id);
-    const tab = activeTab();
-    expect(tab.kind).toBe("log");
-    expect(tab.title).toBe("20260507_143343_zsh.log");
-    expect(firstLeafContent(tab)).toEqual({ kind: "log", logName: "20260507_143343_zsh.log" });
-    expect(leafIds(tab.paneTree)).toHaveLength(1);
-  });
-
-  it("reuses the same tab id and replaces content when called with a different log name", () => {
-    const id = useTabsStore.getState().openLogTab("first.log");
-    useTabsStore.getState().newTerminalTab();
-    const id2 = useTabsStore.getState().openLogTab("second.log");
-    expect(id2).toBe(id);
-    expect(useTabsStore.getState().activeId).toBe(id);
-    expect(useTabsStore.getState().tabs.filter((t) => t.kind === "log")).toHaveLength(1);
-    const tab = useTabsStore.getState().tabs.find((t) => t.id === id)!;
-    expect(tab.title).toBe("second.log");
-    expect(firstLeafContent(tab)).toEqual({ kind: "log", logName: "second.log" });
-  });
-
-  it("preserves split layout when replacing log content in a split log tab", () => {
-    // Open a log tab, then split it so the paneTree is no longer a single leaf.
-    const id = useTabsStore.getState().openLogTab("first.log");
-    const tab0 = useTabsStore.getState().tabs.find((t) => t.id === id)!;
-    const originalLeafId = tab0.activeLeafId;
-    // Split the active pane (adds a second pane).
-    useTabsStore.getState().splitActivePane("row");
-    const splitTab = useTabsStore.getState().tabs.find((t) => t.id === id)!;
-    expect(leafIds(splitTab.paneTree)).toHaveLength(2);
-
-    // Focus the original (log) leaf so openLogTab replaces it.
-    useTabsStore.getState().setActiveLeaf(id, originalLeafId);
-
-    // Calling openLogTab again should reuse the tab AND keep the split intact.
-    const id2 = useTabsStore.getState().openLogTab("second.log");
-    expect(id2).toBe(id);
-    const updated = useTabsStore.getState().tabs.find((t) => t.id === id)!;
-    // Split must still have 2 leaves — not collapsed to 1.
-    expect(leafIds(updated.paneTree)).toHaveLength(2);
-    // The active leaf (the log pane) should show the new log name.
-    const panes = computeLayout(updated.paneTree);
-    const logPane = panes.find((p) => p.id === updated.activeLeafId);
-    expect(logPane?.content).toEqual({ kind: "log", logName: "second.log" });
-    expect(updated.title).toBe("second.log");
-  });
-});
-
 describe("migratePersistedTabs", () => {
   it("migrates v0 simple tabs into single-leaf pane tabs", () => {
     const v0 = {
