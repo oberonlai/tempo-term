@@ -1,16 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RotateCw } from "lucide-react";
 import { onEditorFileChanged } from "@/modules/editor/lib/editorWatch";
-import { resolvePreviewSrc } from "./lib/resolvePreviewSrc";
 import { previewLocalPath } from "./lib/htmlPreviewTarget";
+import { useNativePreviewWebview } from "./hooks/useNativePreviewWebview";
 
-export function PreviewTabContent({ url }: { url: string }) {
+interface PreviewTabContentProps {
+  url: string;
+  /** The owning pane's leaf id; part of the native webview's unique label. */
+  leafId: string;
+  /**
+   * Whether the native preview webview should be shown. It floats above all DOM,
+   * so the parent hides it whenever the pane is not the foremost thing on screen
+   * (inactive tab/space, split drag, or an open overlay).
+   */
+  visible: boolean;
+}
+
+export function PreviewTabContent({ url, leafId, visible }: PreviewTabContentProps) {
   const { t } = useTranslation("preview");
   const [current, setCurrent] = useState(url);
   const [input, setInput] = useState(url);
-  const [reloadKey, setReloadKey] = useState(0);
-  const frameRef = useRef<HTMLIFrameElement>(null);
+  const { hostRef, reload } = useNativePreviewWebview({ url: current, leafId, visible });
 
   // Follow the url prop when it changes (e.g. a file dropped onto this pane).
   useEffect(() => {
@@ -21,7 +32,7 @@ export function PreviewTabContent({ url }: { url: string }) {
   // Local-file previews auto-reload when the file changes on disk (e.g. you save
   // it in the editor). Web urls are not watched. The watched SET is maintained
   // by installEditorWatchSync (it includes local preview paths); here we only
-  // listen and reload when our own file is the one that changed.
+  // listen and reload the native webview when our own file is the one changed.
   useEffect(() => {
     const localPath = previewLocalPath(current);
     if (!localPath) {
@@ -31,20 +42,22 @@ export function PreviewTabContent({ url }: { url: string }) {
     let disposed = false;
     void onEditorFileChanged((changedPath) => {
       if (changedPath === localPath) {
-        setReloadKey((k) => k + 1);
+        reload();
       }
-    }).then((fn) => {
-      if (disposed) {
-        fn();
-      } else {
-        unlisten = fn;
-      }
-    }).catch(() => {});
+    })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch(() => {});
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [current]);
+  }, [current, reload]);
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -53,7 +66,6 @@ export function PreviewTabContent({ url }: { url: string }) {
         onSubmit={(e) => {
           e.preventDefault();
           setCurrent(input.trim());
-          setReloadKey((k) => k + 1);
         }}
       >
         <input
@@ -67,20 +79,16 @@ export function PreviewTabContent({ url }: { url: string }) {
           type="button"
           aria-label={t("reload")}
           title={t("reload")}
-          onClick={() => setReloadKey((k) => k + 1)}
+          onClick={reload}
           className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
         >
           <RotateCw size={14} />
         </button>
       </form>
-      <iframe
-        ref={frameRef}
-        key={reloadKey}
-        data-reload={reloadKey}
-        src={resolvePreviewSrc(current)}
-        title={t("title")}
-        className="min-h-0 flex-1 w-full border-0 bg-white"
-      />
+      {/* The native preview webview is composited over this host element; it is
+          positioned to match the host's rect. bg-white shows while the webview
+          loads or when it is hidden. */}
+      <div ref={hostRef} className="min-h-0 flex-1 bg-white" />
     </div>
   );
 }

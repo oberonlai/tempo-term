@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 import { useSshPrompts } from "./lib/useSshPrompts";
 
 /**
@@ -18,6 +19,9 @@ export function SshPromptDialog() {
   const { current, reply } = useSshPrompts();
   const [secret, setSecret] = useState("");
   const [remember, setRemember] = useState(false);
+
+  // Hide the native preview webview while a prompt is displayed.
+  useOverlayGuard(current != null);
 
   // Reset the secret/remember inputs whenever the displayed prompt changes, so a
   // new prompt never shows stale input carried over from a previous one.

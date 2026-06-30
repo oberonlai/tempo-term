@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 
 export interface InputField {
   key: string;
@@ -43,6 +44,9 @@ export function CommitInputModal({
   onClose,
 }: CommitInputModalProps) {
   const [values, setValues] = useState<Record<string, string>>({});
+
+  // Hide the native preview webview while this modal is open.
+  useOverlayGuard(open);
 
   // Reset whenever the modal (re)opens or its purpose (title) changes, seeding
   // any fields that carry a default value.

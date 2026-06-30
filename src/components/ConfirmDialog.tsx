@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 
 interface ConfirmDialogProps {
   title: string;
@@ -17,6 +18,9 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  // Mounted only while open, so guard unconditionally to hide the preview webview.
+  useOverlayGuard(true);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

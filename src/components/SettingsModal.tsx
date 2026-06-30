@@ -3,11 +3,16 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { SettingsView } from "@/modules/settings/SettingsView";
 import { useUiStore } from "@/stores/uiStore";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 
 export function SettingsModal() {
   const { t } = useTranslation();
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const close = () => setSettingsOpen(false);
+
+  // This modal is only mounted while open, so hide the native preview webview
+  // (which floats above all DOM) for as long as it is on screen.
+  useOverlayGuard(true);
 
   // Esc closes the modal, matching the other dialogs in the app. The Zustand
   // setter is a stable reference, so the listener binds once.

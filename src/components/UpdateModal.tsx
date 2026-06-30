@@ -1,6 +1,7 @@
 import { Sparkles, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUpdaterStore } from "@/stores/updaterStore";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 import { MarkdownView } from "./MarkdownView";
 import { separateLanguageSections } from "./releaseNotes";
 
@@ -19,6 +20,9 @@ export function UpdateModal() {
   const errorMessage = useUpdaterStore((s) => s.errorMessage);
   const installUpdate = useUpdaterStore((s) => s.installUpdate);
   const dismiss = useUpdaterStore((s) => s.dismissModal);
+
+  // Hide the native preview webview while this modal is on screen.
+  useOverlayGuard(modalOpen && available !== null);
 
   if (!modalOpen || !available) {
     return null;

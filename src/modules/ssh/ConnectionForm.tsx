@@ -7,6 +7,7 @@ import { useConnectionsStore, type SshConnection, type PortForward } from "@/sto
 import { useTabsStore } from "@/stores/tabsStore";
 import type { SshAuthMethod } from "@/modules/ssh/lib/parseSshCommand";
 import { pickFile } from "@/lib/dialog";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 
 interface ConnectionFormProps {
   /** When provided, the form is in edit mode pre-filled from this connection. */
@@ -105,6 +106,9 @@ const AUTH_METHOD_OPTIONS: SshAuthMethod[] = ["password", "keyFile", "agent"];
 
 export function ConnectionForm({ connection, onClose }: ConnectionFormProps) {
   const { t } = useTranslation("common");
+
+  // Mounted only while open, so guard unconditionally to hide the preview webview.
+  useOverlayGuard(true);
 
   const addConnection = useConnectionsStore((s) => s.addConnection);
   const updateConnection = useConnectionsStore((s) => s.updateConnection);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import type { LucideProps } from "lucide-react";
+import { useOverlayGuard } from "@/lib/overlayGuard";
 
 export interface ContextMenuItem {
   /** Stable key, also used to group items: a divider is drawn between groups. */
@@ -29,6 +30,9 @@ interface ContextMenuProps {
  */
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Rendered only while open, so guard unconditionally to hide the preview webview.
+  useOverlayGuard(true);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
