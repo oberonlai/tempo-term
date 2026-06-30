@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ClipboardPaste, Copy, Loader2, WifiOff } from "lucide-react";
 import { consumeFreshSshLeaf } from "@/modules/ssh/lib/freshSshLeaves";
-import { createTerminal, enableWebglRenderer, type TerminalHandle } from "./lib/createTerminal";
+import { createTerminal, type TerminalHandle } from "./lib/createTerminal";
 import { createOutputWriter } from "./lib/outputWriter";
 import { SearchBar } from "./SearchBar";
 import { openPty, type PtySession } from "./lib/pty-bridge";
@@ -294,10 +294,6 @@ export function TerminalView({
     handleRef.current = handle;
     const { term, fit } = handle;
     term.open(container);
-    // Opt into GPU rendering now that the canvas is mounted. Falls back to the
-    // DOM renderer on its own if WebGL is unavailable; term.dispose() (cleanup
-    // below) tears the addon down with the terminal.
-    enableWebglRenderer(term);
 
     // Batch live PTY/SSH output through a frame-scheduled writer so a flood
     // (cat a huge file, runaway logs) can't block the UI thread. One-shot writes
@@ -672,8 +668,8 @@ export function TerminalView({
 
     let disposed = false;
 
-    // Defer the initial fit to the next animation frame so the WebGL renderer
-    // has time to compute cell dimensions. FitAddon returns early (no-op) when
+    // Defer the initial fit to the next animation frame so the renderer has
+    // time to compute cell dimensions. FitAddon returns early (no-op) when
     // cell.width is 0, which leaves the terminal at the default 80×24 and the
     // PTY spawns at 80 cols regardless of the actual pane width. The "tab
     // becomes active" useEffect already uses rAF for the same reason.

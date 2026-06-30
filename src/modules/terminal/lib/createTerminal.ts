@@ -3,8 +3,6 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { installAtlasPressureGuard } from "./webglAtlasGuard";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { buildTerminalFontFamily } from "@/modules/fonts/lib/fontChain";
 import { isLocalUrl, isWebUrl } from "@/lib/url";
@@ -93,37 +91,10 @@ export function createTerminal(options: CreateTerminalOptions = {}): TerminalHan
   // cells and the cursor never drifts out of alignment.
   term.unicode.activeVersion = "11";
 
+  // No GPU (WebGL) renderer: xterm falls back to its built-in DOM renderer when
+  // no WebGL/Canvas addon is loaded. WebGL's texture-atlas glyph cache renders
+  // unreliably inside macOS WKWebView (garbled / overlapping glyphs on first
+  // paint and after DPR changes), so we deliberately stay on the DOM renderer
+  // for correctness.
   return { term, fit, search };
-}
-
-/**
- * Switch the terminal to the WebGL (GPU-accelerated) renderer. Must run after
- * `term.open()`, because the addon needs the terminal's mounted canvas.
- *
- * WebGL can be unavailable or fail mid-session: no GPU / headless environment,
- * a blocked context, or the OS reclaiming the context on sleep/wake. In every
- * failure case we drop back to xterm's default DOM renderer so the terminal
- * keeps working rather than going blank. Returns the addon while it is active
- * (so the caller may dispose it), or `null` when we fell back to DOM.
- */
-export function enableWebglRenderer(term: Terminal): WebglAddon | null {
-  try {
-    const addon = new WebglAddon();
-    // A lost GPU context leaves a blank canvas; dispose the addon so xterm
-    // reattaches its DOM renderer.
-    addon.onContextLoss(() => addon.dispose());
-    term.loadAddon(addon);
-    // Clear the glyph atlas just before it overflows, so long CJK-heavy sessions
-    // don't start rendering the wrong glyphs (see webglAtlasGuard). Run the
-    // guard's cleanup when the addon is disposed so its listener doesn't leak.
-    const disposeAtlasGuard = installAtlasPressureGuard(addon);
-    const originalDispose = addon.dispose.bind(addon);
-    addon.dispose = () => {
-      disposeAtlasGuard();
-      originalDispose();
-    };
-    return addon;
-  } catch {
-    return null;
-  }
 }
