@@ -3,6 +3,7 @@ use tauri::window::Color;
 use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const NEW_WINDOW_ID: &str = "new-window";
+const CLOSE_WINDOW_ID: &str = "close-window";
 
 /// Build the menu (Tauri's default plus a New Window item injected into File),
 /// set it as the app menu, and wire the menu-event handler.
@@ -18,19 +19,65 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+N"),
     )?;
+    // Tauri's default menu bundles TWO separate native "Close Window" items
+    // bound to Cmd+W (the OS's standard accelerator) — the last item in
+    // "File" (its only item) and the last item in "Window" (after
+    // Minimize/Maximize/separator). Either one closes the actual window
+    // directly at the Tauri-runtime level, bypassing the frontend's own
+    // close-pane-or-tab keydown handler (src/App.tsx's `key === "w"`
+    // branch) entirely — and since this app is usually a single window,
+    // closing it quits the whole app. Both must be removed (removing only
+    // one still leaves Cmd+W captured by the other) so Cmd+W reaches the
+    // frontend handler. Closing the actual window moves to Shift+Cmd+W
+    // instead, wired below as a custom item since
+    // PredefinedMenuItem::close_window has no accelerator override.
+    //
+    // Removal matches by POSITION, not by the item's text — predefined
+    // items are localized by the OS (e.g. "Fermer la fenêtre" in French),
+    // so a text match would silently fail on non-English systems, and their
+    // `MenuId` is a random per-instance counter (confirmed by reading
+    // muda's source), not a stable value tied to which predefined action
+    // they represent, so an id match doesn't work either. The exact
+    // position was confirmed empirically for this tauri/muda version via a
+    // temporary runtime diagnostic dump of the actual default menu
+    // structure, not just from documentation.
+    let close_window = MenuItem::with_id(
+        &handle,
+        CLOSE_WINDOW_ID,
+        "Close Window",
+        true,
+        Some("Shift+CmdOrCtrl+W"),
+    )?;
+    let mut inserted_close_window = false;
     for item in menu.items()? {
         if let MenuItemKind::Submenu(submenu) = item {
-            if submenu.text()? == "File" {
+            let text = submenu.text()?;
+            if text == "File" || text == "Window" {
+                let items = submenu.items()?;
+                if matches!(items.last(), Some(MenuItemKind::Predefined(_))) {
+                    submenu.remove_at(items.len() - 1)?;
+                }
+            }
+            if text == "File" {
                 submenu.insert(&new_window, 0)?;
                 submenu.insert(&PredefinedMenuItem::separator(&handle)?, 1)?;
-                break;
+                submenu.append(&close_window)?;
+                inserted_close_window = true;
             }
         }
     }
+    debug_assert!(
+        inserted_close_window,
+        "menu default no longer has a File submenu to attach Close Window to"
+    );
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         if event.id() == NEW_WINDOW_ID {
             let _ = create_new_window(app);
+        } else if event.id() == CLOSE_WINDOW_ID {
+            if let Some(window) = app.get_focused_window() {
+                let _ = window.close();
+            }
         }
     });
     Ok(())
