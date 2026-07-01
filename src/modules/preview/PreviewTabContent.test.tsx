@@ -19,16 +19,22 @@ vi.mock("@/modules/editor/lib/editorWatch", () => ({
   },
 }));
 
-// Stub the native webview hook and expose its reload() for assertions.
+// Stub the native webview hook and expose its reload() for assertions. back and
+// forward are stable module-level fns so the controls-registration effect does
+// not re-run every render.
 const reload = vi.fn();
+const back = vi.fn();
+const forward = vi.fn();
 vi.mock("./hooks/useNativePreviewWebview", () => ({
-  useNativePreviewWebview: () => ({ hostRef: { current: null }, reload }),
+  useNativePreviewWebview: () => ({ hostRef: { current: null }, reload, back, forward }),
 }));
 
 import { PreviewTabContent } from "./PreviewTabContent";
 
 afterEach(() => {
   reload.mockClear();
+  back.mockClear();
+  forward.mockClear();
   changeHandler = null;
 });
 

@@ -14,6 +14,7 @@ pub mod menu;
 pub mod notes;
 pub mod ports;
 pub mod pr;
+pub mod preview;
 pub mod pty;
 pub mod secrets;
 pub mod session_log;

@@ -27,6 +27,10 @@ use modules::git::{
     git_unstage, git_worktree_info,
 };
 use modules::pr::{gh_available, pr_via_api, pr_via_gh};
+use modules::preview::{
+    preview_close, preview_create, preview_history_back, preview_history_forward, preview_navigate,
+    preview_reload,
+};
 use modules::secrets::{
     secrets_delete_key, secrets_has_key, secrets_set_key, ssh_secret_delete, ssh_secret_set,
 };
@@ -193,6 +197,12 @@ pub fn run() {
             gh_available,
             pr_via_gh,
             pr_via_api,
+            preview_create,
+            preview_navigate,
+            preview_reload,
+            preview_history_back,
+            preview_history_forward,
+            preview_close,
             ai_chat,
             terminal_history_save,
             terminal_history_load,
