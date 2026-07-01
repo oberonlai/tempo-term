@@ -1000,14 +1000,6 @@ export function TerminalView({
     if (!cwdTracking || sshRef.current) {
       return;
     }
-    // Windows has no cwd/foreground backend: pty_cwd and pty_foreground_command
-    // both resolve to None there (no /proc, no lsof — see read_process_cwd in
-    // src-tauri/src/modules/pty/session.rs), so this 1.2s-per-terminal poll would
-    // only fire IPC that always comes back empty. Skip it until a Windows cwd
-    // implementation exists.
-    if (IS_WINDOWS) {
-      return;
-    }
     let cancelled = false;
     // Seed with the shell's starting dir so the mount-time setRoot (which fires
     // with this same dir) does not echo a redundant `cd` back into the shell.
@@ -1059,8 +1051,17 @@ export function TerminalView({
         // ignore transient failures
       }
     };
-    void poll();
-    const timer = setInterval(() => void poll(), 1200);
+    // Windows has no cwd/foreground backend (pty_cwd / pty_foreground_command
+    // return None there — no /proc, no lsof; see read_process_cwd in
+    // src-tauri/src/modules/pty/session.rs), so the terminal→explorer poll would
+    // only fire IPC that always comes back empty. Skip just the poll on Windows;
+    // the explorer→terminal `cd` subscription below still works there (writing a
+    // `cd` to the shell is fine), so it stays active.
+    let timer: ReturnType<typeof setInterval> | undefined;
+    if (!IS_WINDOWS) {
+      void poll();
+      timer = setInterval(() => void poll(), 1200);
+    }
     // React to every explorer-root change (from this poll OR from the explorer):
     // retitle the active tab to the new dir, and if the shell isn't already there
     // (i.e. the change came from the explorer, not the shell), cd it. Title sync
@@ -1085,7 +1086,9 @@ export function TerminalView({
     });
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) {
+        clearInterval(timer);
+      }
       unsubscribe();
     };
   }, [cwdTracking]);

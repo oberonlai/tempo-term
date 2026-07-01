@@ -211,9 +211,11 @@ fn run_gh(mut command: Command) -> Option<std::process::Output> {
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
-    match child.wait_timeout(GH_TIMEOUT).ok()? {
-        Some(_) => child.wait_with_output().ok(),
-        None => {
+    match child.wait_timeout(GH_TIMEOUT) {
+        Ok(Some(_)) => child.wait_with_output().ok(),
+        // Timed out, or the wait itself failed: kill and reap either way so a
+        // hung gh never lingers as a zombie/background process.
+        Ok(None) | Err(_) => {
             let _ = child.kill();
             let _ = child.wait();
             None
