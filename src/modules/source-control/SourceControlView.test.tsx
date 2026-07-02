@@ -142,7 +142,9 @@ describe("SourceControlView folder view", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
 
-    const stageSrc = await screen.findByRole("button", { name: "Stage folder: src" });
+    const stageSrc = await screen.findByRole("button", {
+      name: "Stage Folder (Including Subfolders): src",
+    });
     fireEvent.click(stageSrc);
 
     await waitFor(() => {
@@ -167,7 +169,9 @@ describe("SourceControlView folder view", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
 
-    const unstageSrc = await screen.findByRole("button", { name: "Unstage folder: src" });
+    const unstageSrc = await screen.findByRole("button", {
+      name: "Unstage Folder (Including Subfolders): src",
+    });
     fireEvent.click(unstageSrc);
 
     await waitFor(() => {
@@ -190,6 +194,61 @@ describe("SourceControlView folder view", () => {
 
     // Grouped under "a/b", the row keeps a readable "dir/" label.
     expect(await screen.findByText("dir/")).toBeInTheDocument();
+  });
+});
+
+describe("SourceControlView nested folder tree", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(gitBridge.gitResolveRepo).mockResolvedValue("/repo");
+    vi.mocked(gitBridge.gitLog).mockResolvedValue([]);
+    vi.mocked(gitBridge.gitStatus).mockResolvedValue({
+      branch: "main",
+      staged: [],
+      unstaged: [
+        { path: "dist/aaa/x.ts", staged: false, status: "M" },
+        { path: "dist/bbb/y.ts", staged: false, status: "M" },
+      ],
+    });
+    useWorkspaceStore.getState().setRoot("/repo");
+  });
+
+  it("nests dist/aaa and dist/bbb under a single dist folder instead of two top-level groups", async () => {
+    render(<SourceControlView />);
+    fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
+
+    await screen.findByText("x.ts");
+    // Exactly one "dist" folder header exists — aaa/bbb are its children, not
+    // separate top-level groups (the bug this batch fixes).
+    expect(screen.getAllByText("dist")).toHaveLength(1);
+    expect(screen.getByText("aaa")).toBeInTheDocument();
+    expect(screen.getByText("bbb")).toBeInTheDocument();
+  });
+
+  it("staging the top folder stages every file in the whole subtree, not just direct children", async () => {
+    render(<SourceControlView />);
+    fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
+    await screen.findByText("x.ts");
+
+    // aria-label is `${folderActionLabel}: ${path}`, e.g. "Stage Folder
+    // (Including Subfolders): dist" once the wording update lands.
+    fireEvent.click(screen.getByRole("button", { name: /stage folder.*: dist$/i }));
+
+    await waitFor(() => {
+      expect(gitBridge.gitStage).toHaveBeenCalledWith("/repo", "dist/aaa/x.ts");
+      expect(gitBridge.gitStage).toHaveBeenCalledWith("/repo", "dist/bbb/y.ts");
+    });
+  });
+
+  it("collapsing a folder hides its nested subtree", async () => {
+    render(<SourceControlView />);
+    fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
+    await screen.findByText("x.ts");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse dist" }));
+
+    expect(screen.queryByText("x.ts")).not.toBeInTheDocument();
+    expect(screen.queryByText("aaa")).not.toBeInTheDocument();
   });
 });
 
