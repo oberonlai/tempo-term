@@ -290,6 +290,10 @@ export function GitGraphTabContent() {
     aiRegenerate: t("details.aiRegenerate"),
     aiNeedKey: t("details.aiNeedKey"),
     aiEmpty: t("details.aiEmpty"),
+    viewFolder: t("details.viewFolder"),
+    viewFlat: t("details.viewFlat"),
+    expandFolder: (name: string) => t("details.expandFolder", { name }),
+    collapseFolder: (name: string) => t("details.collapseFolder", { name }),
   };
 
   const openCreateBranchModal = (commit: CommitNode) =>

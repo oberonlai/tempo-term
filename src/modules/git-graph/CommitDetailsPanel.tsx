@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderTree, List, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Resizer } from "@/components/Resizer";
 import { Tooltip } from "@/components/Tooltip";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { buildFileTree, type TreeNode } from "@/lib/fileTree";
 import { gitCommitDetails, gitCommitFileDiff } from "./lib/gitGraphBridge";
 import { parseDiffLines } from "./lib/parseDiff";
 import { useVirtualRows } from "./lib/useVirtualRows";
 import { DiffView } from "./DiffView";
 import { DiffExplain } from "./DiffExplain";
-import type { CommitDetails, CommitNode, DiffLine } from "./types";
+import type { CommitDetails, CommitFileChange, CommitNode, DiffLine } from "./types";
 
 export interface CommitDetailsLabels {
   author: string;
@@ -26,6 +27,11 @@ export interface CommitDetailsLabels {
   aiRegenerate: string;
   aiNeedKey: string;
   aiEmpty: string;
+  viewFolder: string;
+  viewFlat: string;
+  /** "Expand {{name}}" / "Collapse {{name}}" — {{name}} is filled by the caller. */
+  expandFolder: (name: string) => string;
+  collapseFolder: (name: string) => string;
 }
 
 interface CommitDetailsPanelProps {
@@ -50,6 +56,8 @@ const STATUS_COLORS: Record<string, string> = {
 const FILE_ROW_HEIGHT = 22;
 const FILE_OVERSCAN = 20;
 
+type FilesViewMode = "flat" | "folder";
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -60,6 +68,86 @@ function getErrorMessage(error: unknown): string {
   return "Unexpected error";
 }
 
+/**
+ * Recursively renders one level of a read-only changed-files tree: folder
+ * rows only expand/collapse (no actions — this is a historical commit's
+ * files, not the working tree), file rows select a file to view its diff.
+ */
+function DetailsTreeRows({
+  nodes,
+  depth,
+  collapsed,
+  onToggleCollapse,
+  selectedFile,
+  onSelectFile,
+  labels,
+}: {
+  nodes: TreeNode<CommitFileChange>[];
+  depth: number;
+  collapsed: Set<string>;
+  onToggleCollapse: (path: string) => void;
+  selectedFile: string | null;
+  onSelectFile: (path: string) => void;
+  labels: Pick<CommitDetailsLabels, "expandFolder" | "collapseFolder">;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        if (node.kind === "file") {
+          return (
+            <button
+              key={node.path}
+              type="button"
+              onClick={() => onSelectFile(node.file.path)}
+              style={{ height: `${FILE_ROW_HEIGHT}px`, paddingLeft: `${depth * 14 + 8}px` }}
+              className={`flex w-full items-center gap-2 rounded pr-2 text-left font-mono text-[13px] ${
+                selectedFile === node.file.path
+                  ? "bg-bg-elevated text-fg"
+                  : "text-fg-muted hover:bg-bg-elevated/50"
+              }`}
+            >
+              <span
+                className={`w-3 shrink-0 font-semibold ${STATUS_COLORS[node.file.status] ?? "text-fg-muted"}`}
+              >
+                {node.file.status}
+              </span>
+              <span className="truncate">{node.name}</span>
+            </button>
+          );
+        }
+        const isCollapsed = collapsed.has(node.path);
+        return (
+          <div key={node.path}>
+            <button
+              type="button"
+              onClick={() => onToggleCollapse(node.path)}
+              aria-label={
+                isCollapsed ? labels.expandFolder(node.name) : labels.collapseFolder(node.name)
+              }
+              style={{ height: `${FILE_ROW_HEIGHT}px`, paddingLeft: `${depth * 14 + 8}px` }}
+              className="flex w-full items-center gap-1 pr-2 text-left font-mono text-[13px] text-fg-subtle hover:bg-bg-elevated/50"
+            >
+              {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              <span className="truncate">{node.name}</span>
+            </button>
+            {!isCollapsed && (
+              <DetailsTreeRows
+                nodes={node.children}
+                depth={depth + 1}
+                collapsed={collapsed}
+                onToggleCollapse={onToggleCollapse}
+                selectedFile={selectedFile}
+                onSelectFile={onSelectFile}
+                labels={labels}
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDetailsPanelProps) {
   const [details, setDetails] = useState<CommitDetails | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -67,6 +155,8 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
   const [error, setError] = useState<string | null>(null);
   const [diffText, setDiffText] = useState("");
   const [tab, setTab] = useState<"diff" | "ai">("diff");
+  const [filesViewMode, setFilesViewMode] = useState<FilesViewMode>("flat");
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [leftWidth, setLeftWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem("tempoterm-gitgraph-details-left-width"));
     return Number.isFinite(v) && v > 0 ? v : 280;
@@ -93,6 +183,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     setDetails(null);
     setSelectedFile(null);
     setDiffLines([]);
+    setCollapsedFolders(new Set());
     gitCommitDetails(repo, commit.hash)
       .then((d) => {
         if (cancelled) {
@@ -154,6 +245,18 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
   );
   const visibleFiles = files.slice(filesWindow.start, filesWindow.end);
 
+  function toggleDetailsFolder(path: string) {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-bg">
       <div className="flex items-center justify-between border-b border-border bg-bg-inset px-3 py-1.5">
@@ -195,12 +298,24 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
               {details.message}
             </pre>
           )}
-          <div className="mt-2 text-[13px] font-medium text-fg-subtle">
-            {labels.changedFiles} ({details?.files.length ?? 0})
+          <div className="mt-2 flex items-center justify-between text-[13px] font-medium text-fg-subtle">
+            <span>
+              {labels.changedFiles} ({details?.files.length ?? 0})
+            </span>
+            <Tooltip label={filesViewMode === "flat" ? labels.viewFolder : labels.viewFlat}>
+              <button
+                type="button"
+                aria-label={filesViewMode === "flat" ? labels.viewFolder : labels.viewFlat}
+                onClick={() => setFilesViewMode((m) => (m === "flat" ? "folder" : "flat"))}
+                className="rounded p-0.5 text-fg-subtle hover:bg-bg-elevated hover:text-fg"
+              >
+                {filesViewMode === "flat" ? <FolderTree size={13} /> : <List size={13} />}
+              </button>
+            </Tooltip>
           </div>
           {details && files.length === 0 ? (
             <div className="mt-1 text-[13px] text-fg-subtle">{labels.noChanges}</div>
-          ) : (
+          ) : filesViewMode === "flat" ? (
             <div
               ref={fileListRef}
               style={{ height: `${filesWindow.totalHeight}px` }}
@@ -228,6 +343,18 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
                   </button>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div ref={fileListRef} className="relative mt-0.5">
+              <DetailsTreeRows
+                nodes={buildFileTree(files)}
+                depth={0}
+                collapsed={collapsedFolders}
+                onToggleCollapse={toggleDetailsFolder}
+                selectedFile={selectedFile}
+                onSelectFile={setSelectedFile}
+                labels={labels}
+              />
             </div>
           )}
         </div>
