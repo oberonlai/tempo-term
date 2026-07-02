@@ -1051,8 +1051,17 @@ export function TerminalView({
         // ignore transient failures
       }
     };
-    void poll();
-    const timer = setInterval(() => void poll(), 1200);
+    // Windows has no cwd/foreground backend (pty_cwd / pty_foreground_command
+    // return None there — no /proc, no lsof; see read_process_cwd in
+    // src-tauri/src/modules/pty/session.rs), so the terminal→explorer poll would
+    // only fire IPC that always comes back empty. Skip just the poll on Windows;
+    // the explorer→terminal `cd` subscription below still works there (writing a
+    // `cd` to the shell is fine), so it stays active.
+    let timer: ReturnType<typeof setInterval> | undefined;
+    if (!IS_WINDOWS) {
+      void poll();
+      timer = setInterval(() => void poll(), 1200);
+    }
     // React to every explorer-root change (from this poll OR from the explorer):
     // retitle the active tab to the new dir, and if the shell isn't already there
     // (i.e. the change came from the explorer, not the shell), cd it. Title sync
@@ -1077,7 +1086,9 @@ export function TerminalView({
     });
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) {
+        clearInterval(timer);
+      }
       unsubscribe();
     };
   }, [cwdTracking]);

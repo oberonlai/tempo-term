@@ -4,7 +4,10 @@
 //! "nothing to show" and degrade gracefully.
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use wait_timeout::ChildExt;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -173,15 +176,62 @@ fn find_gh() -> Option<PathBuf> {
     None
 }
 
+/// Build a `Command` for the `gh` binary with the console suppressed on Windows.
+/// A release build has no console of its own (windows_subsystem = "windows" in
+/// main.rs), so each un-flagged spawn allocates a fresh console that flashes a
+/// window — and PR lookups poll on a timer, so those flashes are constant. See
+/// git::run_git for the same reasoning; CREATE_NO_WINDOW is a no-op on a debug
+/// build that already owns a console.
+fn gh_command(gh: &std::path::Path) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new(gh);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+/// Ceiling on any single `gh` invocation. PR lookups run on a timer, so a hung
+/// gh (network stall, an interactive auth prompt) must not pile up on the
+/// caller's threads — bound the wait and give up instead.
+const GH_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Run a prepared `gh` command to completion, killing it if it outruns
+/// GH_TIMEOUT. Returns the captured output, or None on spawn failure or timeout.
+///
+/// gh's output here (`--version`, a single `pr view --json`) is small — well
+/// under the OS pipe buffer — so waiting on the child before draining stdout
+/// cannot deadlock. A larger-output gh call would need concurrent draining.
+fn run_gh(mut command: Command) -> Option<std::process::Output> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    match child.wait_timeout(GH_TIMEOUT) {
+        Ok(Some(_)) => child.wait_with_output().ok(),
+        // Timed out, or the wait itself failed: kill and reap either way so a
+        // hung gh never lingers as a zombie/background process.
+        Ok(None) | Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            None
+        }
+    }
+}
+
 /// Whether the `gh` CLI is available.
 #[tauri::command]
 pub fn gh_available() -> bool {
     let Some(gh) = find_gh() else {
         return false;
     };
-    Command::new(gh)
-        .arg("--version")
-        .output()
+    let mut command = gh_command(&gh);
+    command.arg("--version");
+    run_gh(command)
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -206,9 +256,11 @@ pub fn pr_via_gh(cwd: String, branch: Option<String>) -> Result<Option<PrInfo>, 
     let Some(gh) = find_gh() else {
         return Ok(None);
     };
-    let output = match Command::new(gh).args(&args).current_dir(&cwd).output() {
-        Ok(output) => output,
-        Err(_) => return Ok(None),
+    let mut command = gh_command(&gh);
+    command.args(&args).current_dir(&cwd);
+    let output = match run_gh(command) {
+        Some(output) => output,
+        None => return Ok(None),
     };
     if !output.status.success() {
         return Ok(None);
