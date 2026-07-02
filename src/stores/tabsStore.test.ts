@@ -342,14 +342,14 @@ describe("tabsStore", () => {
     expect(leafIds(tab.paneTree)).toEqual([firstLeaf]);
   });
 
-  it("focuses the last remaining pane after closing the active pane", () => {
+  it("focuses the first remaining pane after closing the active pane", () => {
     const id = useTabsStore.getState().newTerminalTab();
     useTabsStore.getState().splitActivePane("row");
     useTabsStore.getState().splitActivePane("row");
     const ids = leafIds(activeTab().paneTree);
     expect(ids).toHaveLength(3);
-    // Focus and close the middle pane; focus must land on the last remaining
-    // pane, not the first.
+    // Focus and close the middle pane; focus must land on the first remaining
+    // pane, not the last.
     useTabsStore.setState({
       tabs: useTabsStore.getState().tabs.map((t) =>
         t.id === id ? { ...t, activeLeafId: ids[1] } : t,
@@ -357,7 +357,7 @@ describe("tabsStore", () => {
     });
     useTabsStore.getState().closePane(id, ids[1]);
     expect(leafIds(activeTab().paneTree)).toEqual([ids[0], ids[2]]);
-    expect(activeTab().activeLeafId).toBe(ids[2]);
+    expect(activeTab().activeLeafId).toBe(ids[0]);
   });
 
   it("activates a neighbour when the active tab closes", () => {

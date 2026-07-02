@@ -1049,14 +1049,11 @@ export const useTabsStore = create<TabsState>()(
         }
         return { tabs, activeId };
       }
-      // When the focused pane is the one closing, move focus to the LAST
-      // remaining pane (reading order) rather than the first, so closing a pane
-      // keeps focus near where it was instead of jumping to the leftmost pane.
+      // When the focused pane is the one closing, move focus to the first
+      // remaining pane.
       const remaining = leafIds(paneTree);
       const activeLeafId =
-        tab.activeLeafId === leafId
-          ? (remaining[remaining.length - 1] ?? tab.activeLeafId)
-          : tab.activeLeafId;
+        tab.activeLeafId === leafId ? (remaining[0] ?? tab.activeLeafId) : tab.activeLeafId;
       return {
         tabs: state.tabs.map((t) =>
           t.id === tabId
