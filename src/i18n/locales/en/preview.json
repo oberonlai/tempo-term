@@ -1,5 +1,7 @@
 {
   "title": "Web Preview",
   "urlPlaceholder": "http://localhost:3000",
-  "reload": "Reload"
+  "reload": "Reload",
+  "back": "Back",
+  "forward": "Forward"
 }

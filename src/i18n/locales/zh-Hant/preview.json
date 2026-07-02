@@ -1,5 +1,7 @@
 {
   "title": "網頁預覽",
   "urlPlaceholder": "http://localhost:3000",
-  "reload": "重新載入"
+  "reload": "重新載入",
+  "back": "上一頁",
+  "forward": "下一頁"
 }

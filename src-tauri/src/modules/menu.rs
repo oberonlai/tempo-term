@@ -1,12 +1,25 @@
 use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
 use tauri::window::Color;
-use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{App, AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const NEW_WINDOW_ID: &str = "new-window";
+const CLOSE_TAB_ID: &str = "close-tab";
 const CLOSE_WINDOW_ID: &str = "close-window";
+const OPEN_LOCATION_ID: &str = "preview-open-location";
+/// Emitted to the focused window when ⌘/Ctrl+L is pressed, so the frontend can
+/// focus the address bar of the active preview pane. A menu accelerator is used
+/// because the native preview webview swallows key events before the app webview
+/// can see them.
+const OPEN_LOCATION_EVENT: &str = "menu:preview-open-location";
+const CYCLE_PANE_ID: &str = "cycle-pane";
+/// Emitted to the focused window when ⌘/Ctrl+` is pressed, so the frontend can
+/// move focus to the next pane of the active tab. A menu accelerator is used for
+/// the same reason as Open Location: a focused native preview webview would
+/// otherwise swallow the key before the app webview's handler sees it.
+const CYCLE_PANE_EVENT: &str = "menu:focus-next-pane";
 
-/// Build the menu (Tauri's default plus a New Window item injected into File),
-/// set it as the app menu, and wire the menu-event handler.
+/// Build the menu (Tauri's default plus custom items and a Cmd+W rebind), set it
+/// as the app menu, and wire the menu-event handler.
 pub fn init(app: &mut App) -> tauri::Result<()> {
     // Owned handle so the menu-building borrows do not tangle with the later
     // app.set_menu / app.on_menu_event calls.
@@ -19,28 +32,26 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+N"),
     )?;
-    // Tauri's default menu bundles TWO separate native "Close Window" items
-    // bound to Cmd+W (the OS's standard accelerator) — the last item in
-    // "File" (its only item) and the last item in "Window" (after
-    // Minimize/Maximize/separator). Either one closes the actual window
-    // directly at the Tauri-runtime level, bypassing the frontend's own
-    // close-pane-or-tab keydown handler (src/App.tsx's `key === "w"`
-    // branch) entirely — and since this app is usually a single window,
-    // closing it quits the whole app. Both must be removed (removing only
-    // one still leaves Cmd+W captured by the other) so Cmd+W reaches the
-    // frontend handler. Closing the actual window moves to Shift+Cmd+W
-    // instead, wired below as a custom item since
-    // PredefinedMenuItem::close_window has no accelerator override.
+    // Cmd+W must peel the active tab, not destroy the window. Tauri's default
+    // menu bundles a native "Close Window" (bound to the OS's standard Cmd+W) as
+    // the LAST item of BOTH the File and Window submenus; either one closes the
+    // real window at the runtime level before the frontend can react, and since
+    // this app is usually a single window that quits the whole app. Both are
+    // removed so Cmd+W is free for our custom "Close Tab"; closing the actual
+    // window moves to Shift+Cmd+W.
     //
-    // Removal matches by POSITION, not by the item's text — predefined
-    // items are localized by the OS (e.g. "Fermer la fenêtre" in French),
-    // so a text match would silently fail on non-English systems, and their
-    // `MenuId` is a random per-instance counter (confirmed by reading
-    // muda's source), not a stable value tied to which predefined action
-    // they represent, so an id match doesn't work either. The exact
-    // position was confirmed empirically for this tauri/muda version via a
-    // temporary runtime diagnostic dump of the actual default menu
-    // structure, not just from documentation.
+    // Removal matches by POSITION, not text or id: predefined items are
+    // OS-localized (e.g. "Fermer la fenêtre") so a text match fails on non-English
+    // systems, and their MenuId is a random per-instance counter (per muda's
+    // source), so an id match fails too. The last-item position was confirmed
+    // empirically for this tauri/muda version.
+    //
+    // Cmd+W / Cmd+` / Cmd+L are driven by menu accelerators (not webview keydown)
+    // so they still fire when a native preview webview holds keyboard focus and
+    // would otherwise swallow the key. Each emits an event to the focused window;
+    // the frontend listens scoped to its own label.
+    let close_tab =
+        MenuItem::with_id(&handle, CLOSE_TAB_ID, "Close Tab", true, Some("CmdOrCtrl+W"))?;
     let close_window = MenuItem::with_id(
         &handle,
         CLOSE_WINDOW_ID,
@@ -48,35 +59,74 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
         true,
         Some("Shift+CmdOrCtrl+W"),
     )?;
-    let mut inserted_close_window = false;
+    let open_location = MenuItem::with_id(
+        &handle,
+        OPEN_LOCATION_ID,
+        "Open Location",
+        true,
+        Some("CmdOrCtrl+L"),
+    )?;
+    let cycle_pane =
+        MenuItem::with_id(&handle, CYCLE_PANE_ID, "Cycle Pane", true, Some("CmdOrCtrl+`"))?;
+    let mut inserted = false;
     for item in menu.items()? {
-        if let MenuItemKind::Submenu(submenu) = item {
-            let text = submenu.text()?;
-            if text == "File" || text == "Window" {
-                let items = submenu.items()?;
-                if matches!(items.last(), Some(MenuItemKind::Predefined(_))) {
-                    submenu.remove_at(items.len() - 1)?;
-                }
+        let MenuItemKind::Submenu(submenu) = item else {
+            continue;
+        };
+        let text = submenu.text()?;
+        // Strip the trailing native "Close Window" from File and Window.
+        if text == "File" || text == "Window" {
+            let items = submenu.items()?;
+            if matches!(items.last(), Some(MenuItemKind::Predefined(_))) {
+                submenu.remove_at(items.len() - 1)?;
             }
-            if text == "File" {
+        }
+        match text.as_str() {
+            "File" => {
                 submenu.insert(&new_window, 0)?;
                 submenu.insert(&PredefinedMenuItem::separator(&handle)?, 1)?;
-                submenu.append(&close_window)?;
-                inserted_close_window = true;
+                submenu.append(&open_location)?;
+                submenu.append(&PredefinedMenuItem::separator(&handle)?)?;
+                submenu.append(&close_tab)?;
+                inserted = true;
             }
+            "Window" => {
+                submenu.append(&cycle_pane)?;
+                submenu.append(&close_window)?;
+            }
+            _ => {}
         }
     }
     debug_assert!(
-        inserted_close_window,
-        "menu default no longer has a File submenu to attach Close Window to"
+        inserted,
+        "menu default no longer has a File submenu to attach custom items to"
     );
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         if event.id() == NEW_WINDOW_ID {
             let _ = create_new_window(app);
+        } else if event.id() == CLOSE_TAB_ID {
+            // Target the focused window's label so only its frontend closes a
+            // tab. The webview listens scoped to its own label; a bare emit()
+            // would broadcast and close a tab in every open window.
+            if let Some(win) = app.get_focused_window() {
+                let _ = win.emit_to(win.label(), "menu:close-tab", ());
+            }
         } else if event.id() == CLOSE_WINDOW_ID {
-            if let Some(window) = app.get_focused_window() {
-                let _ = window.close();
+            if let Some(win) = app.get_focused_window() {
+                let _ = win.close();
+            }
+        } else if event.id() == OPEN_LOCATION_ID {
+            // Target the focused window's label so only its frontend focuses the
+            // preview address bar; a bare emit() would broadcast to every window.
+            if let Some(win) = app.get_focused_window() {
+                let _ = win.emit_to(win.label(), OPEN_LOCATION_EVENT, ());
+            }
+        } else if event.id() == CYCLE_PANE_ID {
+            // Target the focused window's label so only its frontend advances the
+            // active pane; a bare emit() would cycle panes in every window.
+            if let Some(win) = app.get_focused_window() {
+                let _ = win.emit_to(win.label(), CYCLE_PANE_EVENT, ());
             }
         }
     });

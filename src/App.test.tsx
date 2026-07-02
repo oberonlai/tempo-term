@@ -1,11 +1,27 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import "./i18n";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useTabsStore } from "@/stores/tabsStore";
-import { leaf, splitLeaf } from "@/modules/terminal/lib/terminalLayout";
+import { leaf, splitLeaf, type LayoutNode } from "@/modules/terminal/lib/terminalLayout";
+
+// ⌘W is driven by the "Close Tab" menu accelerator, which the backend delivers
+// as a `menu:close-tab` event to this webview's scoped listener. Capture that
+// handler so tests can fire ⌘W the way the real app does.
+const menuBridge = vi.hoisted(() => ({ closeTab: null as null | (() => void) }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    setZoom: () => Promise.resolve(),
+    listen: (event: string, handler: () => void) => {
+      if (event === "menu:close-tab") {
+        menuBridge.closeTab = handler;
+      }
+      return Promise.resolve(() => {});
+    },
+  }),
+}));
 
 describe("App shell", () => {
   beforeEach(() => {
@@ -87,10 +103,50 @@ describe("App shell", () => {
     });
     render(<App />);
 
-    fireEvent.keyDown(window, { code: "KeyW", key: "w", metaKey: true });
+    // Fire ⌘W via the menu bridge (the only path — see App.tsx), exactly once.
+    act(() => menuBridge.closeTab?.());
 
     const tab = useTabsStore.getState().tabs.find((t) => t.id === "a");
     expect(tab?.paneTree).toEqual(leaf("right-leaf", { kind: "launcher" }));
+  });
+
+  it("closes only one pane per Cmd+W press (no double-close)", () => {
+    // Three stacked launcher panes; ⌘W must peel exactly one, not cascade.
+    const twoPanes = splitLeaf(leaf("p1", { kind: "launcher" }), "p1", "row", "p2", {
+      kind: "launcher",
+    });
+    const paneTree = splitLeaf(twoPanes, "p2", "row", "p3", { kind: "launcher" });
+    useTabsStore.setState({
+      spaces: [{ id: "s1", name: "Space 1" }],
+      activeSpaceId: "s1",
+      tabs: [
+        {
+          id: "a",
+          spaceId: "s1",
+          title: "a",
+          kind: "launcher" as const,
+          paneTree,
+          activeLeafId: "p1",
+          paneOrder: ["p1", "p2", "p3"],
+        },
+      ],
+      activeId: "a",
+    });
+    render(<App />);
+
+    const paneCount = (tree: LayoutNode): number =>
+      tree.kind === "split" ? paneCount(tree.children[0]) + paneCount(tree.children[1]) : 1;
+
+    // A single keydown of ⌘W must not close a pane at all: ⌘W lives on the menu
+    // accelerator, so a stray keydown handler responding too would double-close.
+    fireEvent.keyDown(window, { code: "KeyW", key: "w", metaKey: true });
+    let tab = useTabsStore.getState().tabs.find((t) => t.id === "a");
+    expect(paneCount(tab!.paneTree)).toBe(3);
+
+    // One menu-driven ⌘W closes exactly one pane, leaving two.
+    act(() => menuBridge.closeTab?.());
+    tab = useTabsStore.getState().tabs.find((t) => t.id === "a");
+    expect(paneCount(tab!.paneTree)).toBe(2);
   });
 
   it("selects the Nth sidebar panel with Option+digit", () => {

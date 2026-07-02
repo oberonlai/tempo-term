@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, RotateCw } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { onEditorFileChanged } from "@/modules/editor/lib/editorWatch";
 import { normalizeAddressInput } from "@/lib/url";
 import { previewLocalPath } from "./lib/htmlPreviewTarget";
+import { registerPreviewControls } from "./lib/previewControls";
 import { useNativePreviewWebview } from "./hooks/useNativePreviewWebview";
 
 interface PreviewTabContentProps {
@@ -17,30 +19,63 @@ interface PreviewTabContentProps {
    */
   visible: boolean;
   /**
-   * Called when the user navigates via the address bar, so the owning pane can
-   * persist the new url and retitle the tab. Local-file previews don't supply it.
+   * Called when the page navigates (address bar, link click, or redirect), so
+   * the owning pane can persist the new url and retitle the tab. Local-file
+   * previews don't supply it.
    */
   onNavigate?: (url: string) => void;
+  /** Called when the page's `<title>` changes, so the owning tab can retitle. */
+  onTitle?: (title: string) => void;
 }
 
-export function PreviewTabContent({ url, leafId, visible, onNavigate }: PreviewTabContentProps) {
+export function PreviewTabContent({
+  url,
+  leafId,
+  visible,
+  onNavigate,
+  onTitle,
+}: PreviewTabContentProps) {
   const { t } = useTranslation("preview");
-  const [current, setCurrent] = useState(url);
   const [input, setInput] = useState(url);
-  const { hostRef, reload } = useNativePreviewWebview({ url: current, leafId, visible });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { hostRef, reload, back, forward } = useNativePreviewWebview({
+    url,
+    leafId,
+    visible,
+    onNavigate,
+    onTitle,
+  });
 
-  // Follow the url prop when it changes (e.g. a file dropped onto this pane).
+  // Follow the url prop when it changes (a file dropped onto this pane, or a
+  // navigation persisted from within the page).
   useEffect(() => {
-    setCurrent(url);
     setInput(url);
   }, [url]);
+
+  const focusAddressBar = useCallback(() => {
+    // The native preview webview holds key focus; pull it back to the app webview
+    // before selecting the input so the user can type immediately.
+    void getCurrentWebview().setFocus().catch(() => {});
+    const el = inputRef.current;
+    if (el) {
+      el.focus();
+      el.select();
+    }
+  }, []);
+
+  // Expose this preview's controls so the ⌘L menu accelerator and ⌘[ / ⌘]
+  // shortcuts can reach whichever preview pane is active.
+  useEffect(
+    () => registerPreviewControls(leafId, { focusAddressBar, back, forward, reload }),
+    [leafId, focusAddressBar, back, forward, reload],
+  );
 
   // Local-file previews auto-reload when the file changes on disk (e.g. you save
   // it in the editor). Web urls are not watched. The watched SET is maintained
   // by installEditorWatchSync (it includes local preview paths); here we only
   // listen and reload the native webview when our own file is the one changed.
   useEffect(() => {
-    const localPath = previewLocalPath(current);
+    const localPath = previewLocalPath(url);
     if (!localPath) {
       return;
     }
@@ -63,21 +98,39 @@ export function PreviewTabContent({ url, leafId, visible, onNavigate }: PreviewT
       disposed = true;
       unlisten?.();
     };
-  }, [current, reload]);
+  }, [url, reload]);
 
   return (
     <div className="flex h-full flex-col bg-bg">
       <form
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2"
+        className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2"
         onSubmit={(e) => {
           e.preventDefault();
           const next = normalizeAddressInput(input);
-          setCurrent(next);
           setInput(next);
           onNavigate?.(next);
         }}
       >
+        <button
+          type="button"
+          aria-label={t("back")}
+          title={t("back")}
+          onClick={back}
+          className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+        >
+          <ArrowLeft size={14} />
+        </button>
+        <button
+          type="button"
+          aria-label={t("forward")}
+          title={t("forward")}
+          onClick={forward}
+          className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+        >
+          <ArrowRight size={14} />
+        </button>
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={t("urlPlaceholder")}

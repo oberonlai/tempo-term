@@ -65,6 +65,7 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
   const wrapPaneWith = useTabsStore((s) => s.wrapPaneWith);
   const setPaneContent = useTabsStore((s) => s.setPaneContent);
   const navigatePreview = useTabsStore((s) => s.navigatePreview);
+  const setPreviewTabTitle = useTabsStore((s) => s.setPreviewTabTitle);
   const setTerminalCwd = useTabsStore((s) => s.setTerminalCwd);
   const closePane = useTabsStore((s) => s.closePane);
   const openHtmlPreview = useTabsStore((s) => s.openHtmlPreview);
@@ -443,6 +444,7 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
                       anyOverlay,
                     })}
                     onNavigate={(url) => navigatePreview(tab.id, pane.id, url)}
+                    onTitle={(title) => setPreviewTabTitle(tab.id, pane.id, title)}
                   />
                 ) : pane.content.kind === "git-graph" ? (
                   <GitGraphTabContent />

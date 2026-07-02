@@ -125,6 +125,51 @@ describe("navigatePreview", () => {
   });
 });
 
+describe("setPreviewTabTitle", () => {
+  beforeEach(reset);
+
+  it("retitles a single-pane preview tab from the page title", () => {
+    const id = useTabsStore.getState().openPreviewTab("http://localhost:3000");
+    const leafId = activeTab().activeLeafId;
+
+    useTabsStore.getState().setPreviewTabTitle(id, leafId, "  My Cool Page  ");
+
+    expect(activeTab().title).toBe("My Cool Page");
+  });
+
+  it("ignores an empty title", () => {
+    const id = useTabsStore.getState().openPreviewTab("http://localhost:3000");
+    const leafId = activeTab().activeLeafId;
+
+    useTabsStore.getState().setPreviewTabTitle(id, leafId, "   ");
+
+    expect(activeTab().title).toBe("localhost:3000");
+  });
+
+  it("does not retitle when the preview is one pane of several", () => {
+    const tabId = useTabsStore.getState().openEditorTab("/a/b.ts");
+    const editorLeafId = activeTab().activeLeafId;
+    useTabsStore
+      .getState()
+      .splitPaneWith(tabId, editorLeafId, { kind: "preview", url: "http://localhost:3000" }, "row");
+    const previewLeafId = activeTab().activeLeafId;
+
+    useTabsStore.getState().setPreviewTabTitle(tabId, previewLeafId, "My Cool Page");
+
+    expect(activeTab().title).toBe("b.ts");
+  });
+
+  it("keeps a user-renamed tab's title", () => {
+    const id = useTabsStore.getState().openPreviewTab("http://localhost:3000");
+    const leafId = activeTab().activeLeafId;
+    useTabsStore.getState().setTabTitle(id, "My Site");
+
+    useTabsStore.getState().setPreviewTabTitle(id, leafId, "Page Title");
+
+    expect(activeTab().title).toBe("My Site");
+  });
+});
+
 describe("tabsStore", () => {
   beforeEach(reset);
 
@@ -295,6 +340,24 @@ describe("tabsStore", () => {
     useTabsStore.getState().closePane(id, activeTab().activeLeafId);
     const tab = activeTab();
     expect(leafIds(tab.paneTree)).toEqual([firstLeaf]);
+  });
+
+  it("focuses the last remaining pane after closing the active pane", () => {
+    const id = useTabsStore.getState().newTerminalTab();
+    useTabsStore.getState().splitActivePane("row");
+    useTabsStore.getState().splitActivePane("row");
+    const ids = leafIds(activeTab().paneTree);
+    expect(ids).toHaveLength(3);
+    // Focus and close the middle pane; focus must land on the last remaining
+    // pane, not the first.
+    useTabsStore.setState({
+      tabs: useTabsStore.getState().tabs.map((t) =>
+        t.id === id ? { ...t, activeLeafId: ids[1] } : t,
+      ),
+    });
+    useTabsStore.getState().closePane(id, ids[1]);
+    expect(leafIds(activeTab().paneTree)).toEqual([ids[0], ids[2]]);
+    expect(activeTab().activeLeafId).toBe(ids[2]);
   });
 
   it("activates a neighbour when the active tab closes", () => {

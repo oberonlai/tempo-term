@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -15,7 +17,7 @@ interface Rect {
 }
 
 interface Options {
-  /** URL or local path to preview. Changing it recreates the webview. */
+  /** URL or local path to preview. A change navigates the existing webview. */
   url: string;
   /** The owning pane's leaf id; part of the unique webview label. */
   leafId: string;
@@ -25,6 +27,54 @@ interface Options {
    * screen (inactive tab/space, split drag, or an open overlay).
    */
   visible: boolean;
+  /**
+   * Called when the page navigates (link click, redirect, or address-bar load)
+   * so the owning pane can follow the url in the address bar and persist it.
+   * Local-file (asset://) targets are not reported.
+   */
+  onNavigate?: (url: string) => void;
+  /** Called when the page's `<title>` changes so the owning tab can retitle. */
+  onTitle?: (title: string) => void;
+}
+
+interface TitleEvent {
+  label: string;
+  title: string;
+}
+
+interface NavigatedEvent {
+  label: string;
+  url: string;
+}
+
+// React StrictMode double-invokes effects (mount → unmount → mount) in dev, and
+// creation/teardown of the native webview is async — so a naive "create on
+// mount, close on cleanup" races itself into a closed or duplicated webview.
+// Two module-level, label-keyed guards make the lifecycle idempotent:
+//  - `creatingWebviews`: coalesces concurrent create requests so a double-mount
+//    never builds two webviews with the same label.
+//  - `pendingCloses`: defers the close so a fast remount can cancel it and adopt
+//    the still-alive webview instead of tearing it down and rebuilding.
+const creatingWebviews = new Map<string, Promise<void>>();
+const pendingCloses = new Map<string, ReturnType<typeof setTimeout>>();
+const CLOSE_DELAY_MS = 100;
+
+/** Create the webview once per label; concurrent callers share one request. */
+function ensurePreviewWebview(label: string, url: string, rect: Rect): Promise<void> {
+  const existing = creatingWebviews.get(label);
+  if (existing) {
+    return existing;
+  }
+  const inflight = invoke<void>("preview_create", { label, url, ...rect })
+    .catch((e) => {
+      // eslint-disable-next-line no-console
+      console.error(`[preview] failed to create webview "${label}":`, e);
+    })
+    .finally(() => {
+      creatingWebviews.delete(label);
+    });
+  creatingWebviews.set(label, inflight);
+  return inflight;
 }
 
 function rectOf(el: HTMLElement | null): Rect | null {
@@ -47,8 +97,14 @@ function sameRect(a: Rect | null, b: Rect | null): boolean {
  * Unlike an `<iframe>`, the child webview is a native layer composited over the
  * window — so it ignores `X-Frame-Options`/`frame-ancestors` (it can show
  * wp-admin etc.), but it is NOT part of the DOM: it must be positioned, shown,
- * and hidden manually to track the pane. `@tauri-apps/api@2.11` has no
- * `navigate`/`reload`, so a URL change or reload recreates the webview.
+ * and hidden manually to track the pane.
+ *
+ * The webview is CREATED in Rust (`preview_create`) so it can attach the
+ * builder-only callbacks the JS API lacks: page-title changes and navigation
+ * tracking, both surfaced here as events. Once created, its JS handle (via
+ * `Webview.getByLabel`) is used for positioning/show/hide, and the `preview_*`
+ * commands drive navigate/reload/back/forward without recreating it — which is
+ * what keeps the back/forward history intact.
  *
  * A child webview's position is relative to the window in logical pixels and is
  * NOT affected by the main webview's zoom. The app zooms the main webview via
@@ -56,20 +112,33 @@ function sameRect(a: Rect | null, b: Rect | null): boolean {
  * pixels whose on-screen size is `value * uiZoom` window-logical pixels. We
  * therefore multiply the host rect by `uiZoom` before positioning the child.
  *
- * Returns the host ref to attach where the webview should sit, and a `reload`.
+ * Returns the host ref plus navigate/reload/back/forward controls.
  */
-export function useNativePreviewWebview({ url, leafId, visible }: Options) {
+export function useNativePreviewWebview({ url, leafId, visible, onNavigate, onTitle }: Options) {
   const hostRef = useRef<HTMLDivElement>(null);
   const webviewRef = useRef<Webview | null>(null);
   const visibleRef = useRef(visible);
   const shownRef = useRef(false);
   const lastRectRef = useRef<Rect | null>(null);
-  const [reloadNonce, setReloadNonce] = useState(0);
+  // The last src we asked the webview to load, so a url-prop change only
+  // navigates when it is genuinely different (and never re-loads the initial).
+  const loadedSrcRef = useRef<string | null>(null);
+  // The latest url prop, readable inside the creation effect's async closure
+  // (which otherwise captures a stale url). Lets us catch up if the url changes
+  // while the webview is still being built — see the creation effect below.
+  const latestUrlRef = useRef(url);
+  latestUrlRef.current = url;
   const uiZoom = useSettingsStore((s) => s.uiZoom);
   const zoomRef = useRef(uiZoom);
+  const onNavigateRef = useRef(onNavigate);
+  const onTitleRef = useRef(onTitle);
 
   visibleRef.current = visible;
   zoomRef.current = uiZoom;
+  onNavigateRef.current = onNavigate;
+  onTitleRef.current = onTitle;
+
+  const label = previewWebviewLabel(getCurrentWindow().label, leafId);
 
   // Push the webview to match the host's current rect and visibility. Cheap to
   // call often: it no-ops unless something actually changed.
@@ -80,7 +149,7 @@ export function useNativePreviewWebview({ url, leafId, visible }: Options) {
     if (!visibleRef.current) {
       if (shownRef.current) {
         shownRef.current = false;
-        void webview.hide();
+        void webview.hide().catch(() => {});
       }
       return;
     }
@@ -93,12 +162,12 @@ export function useNativePreviewWebview({ url, leafId, visible }: Options) {
       // The host rect is in zoomed page pixels; the child webview lives in
       // unzoomed window pixels, so scale by the UI zoom factor.
       const z = zoomRef.current;
-      void webview.setPosition(new LogicalPosition(rect.x * z, rect.y * z));
-      void webview.setSize(new LogicalSize(rect.width * z, rect.height * z));
+      void webview.setPosition(new LogicalPosition(rect.x * z, rect.y * z)).catch(() => {});
+      void webview.setSize(new LogicalSize(rect.width * z, rect.height * z)).catch(() => {});
     }
     if (!shownRef.current) {
       shownRef.current = true;
-      void webview.show();
+      void webview.show().catch(() => {});
     }
   }, []);
 
@@ -109,50 +178,122 @@ export function useNativePreviewWebview({ url, leafId, visible }: Options) {
     sync();
   }, [uiZoom, sync]);
 
-  // Create the webview, and recreate it whenever the URL changes or reload is
-  // requested. A fresh label per instance avoids colliding with the previous
-  // webview while it is still closing.
+  // Create the webview once per pane. A url change navigates it (below) rather
+  // than recreating, so its history survives. StrictMode-safe via the module
+  // guards above.
   useEffect(() => {
     let cancelled = false;
+    // A pending close from a just-unmounted instance (StrictMode remount) would
+    // tear this webview down; cancel it so we adopt the live one.
+    const pending = pendingCloses.get(label);
+    if (pending) {
+      clearTimeout(pending);
+      pendingCloses.delete(label);
+    }
+
     const z = zoomRef.current;
     const initial = rectOf(hostRef.current);
-    const label = `${previewWebviewLabel(getCurrentWindow().label, leafId)}-${reloadNonce}`;
-    const webview = new Webview(getCurrentWindow(), label, {
-      url: resolvePreviewSrc(url),
-      // Always pass a rect (in unzoomed window pixels); omitting it makes the
-      // webview fill the whole window. Start at 1×1 when the host is not
-      // measurable so nothing flashes before the first sync positions and shows it.
+    const src = resolvePreviewSrc(url);
+    // Always pass a rect (in unzoomed window pixels); start at 1×1 when the host
+    // is not measurable so nothing flashes before the first sync shows it.
+    const rect: Rect = {
       x: initial ? initial.x * z : 0,
       y: initial ? initial.y * z : 0,
       width: initial ? initial.width * z : 1,
       height: initial ? initial.height * z : 1,
-    });
+    };
 
-    webview.once("tauri://created", () => {
-      if (cancelled) {
-        void webview.close();
-        return;
+    void (async () => {
+      let webview = await Webview.getByLabel(label).catch(() => null);
+      if (!webview) {
+        loadedSrcRef.current = src;
+        await ensurePreviewWebview(label, src, rect);
+        if (cancelled) return;
+        webview = await Webview.getByLabel(label).catch(() => null);
       }
+      if (cancelled || !webview) return;
+      loadedSrcRef.current ??= src;
       webviewRef.current = webview;
       shownRef.current = false;
       lastRectRef.current = null;
       sync();
-    });
-    webview.once("tauri://error", (e) => {
-      // eslint-disable-next-line no-console
-      console.error(`[preview] failed to create webview "${label}":`, e.payload);
-    });
+
+      // If the url prop changed while the webview was being built, the navigate
+      // effect ran too early (webviewRef was still null) and bailed. Reconcile
+      // now so that in-flight change isn't lost.
+      const latestSrc = resolvePreviewSrc(latestUrlRef.current);
+      if (latestSrc !== loadedSrcRef.current) {
+        loadedSrcRef.current = latestSrc;
+        void invoke("preview_navigate", { label, url: latestSrc }).catch(() => {});
+      }
+    })();
 
     return () => {
       cancelled = true;
-      if (webviewRef.current === webview) {
-        webviewRef.current = null;
-      }
+      webviewRef.current = null;
       shownRef.current = false;
       lastRectRef.current = null;
-      void webview.close();
+      // Defer the close so a StrictMode remount (or fast re-mount) can cancel it
+      // and re-adopt the webview instead of destroying and rebuilding it.
+      const existing = pendingCloses.get(label);
+      if (existing) clearTimeout(existing);
+      pendingCloses.set(
+        label,
+        setTimeout(() => {
+          pendingCloses.delete(label);
+          loadedSrcRef.current = null;
+          void invoke("preview_close", { label }).catch(() => {});
+        }, CLOSE_DELAY_MS),
+      );
     };
-  }, [url, leafId, reloadNonce, sync]);
+    // Only leafId (via label) recreates the webview; url is handled separately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [label, sync]);
+
+  // Navigate the existing webview when the url prop changes (e.g. a file dropped
+  // onto this pane). Skips the initial load and any no-op change.
+  useEffect(() => {
+    if (!webviewRef.current) return;
+    const src = resolvePreviewSrc(url);
+    if (src === loadedSrcRef.current) return;
+    loadedSrcRef.current = src;
+    void invoke("preview_navigate", { label, url: src }).catch(() => {});
+  }, [url, label]);
+
+  // Subscribe to the Rust-side title/navigation events for this webview.
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const track = (p: Promise<() => void>) => {
+      void p.then((un) => {
+        if (disposed) un();
+        else unlisteners.push(un);
+      });
+    };
+    track(
+      listen<TitleEvent>("preview://title", (e) => {
+        if (e.payload.label === label) {
+          onTitleRef.current?.(e.payload.title);
+        }
+      }),
+    );
+    track(
+      listen<NavigatedEvent>("preview://navigated", (e) => {
+        if (e.payload.label !== label) return;
+        const next = e.payload.url;
+        loadedSrcRef.current = next;
+        // Local-file previews load through asset://; keep the typed file path in
+        // the address bar rather than replacing it with the asset url.
+        if (!next.startsWith("asset:")) {
+          onNavigateRef.current?.(next);
+        }
+      }),
+    );
+    return () => {
+      disposed = true;
+      unlisteners.forEach((un) => un());
+    };
+  }, [label]);
 
   // Re-sync after every render: a split can move the pane without resizing it,
   // which a ResizeObserver would miss. sync() no-ops when nothing changed.
@@ -179,7 +320,15 @@ export function useNativePreviewWebview({ url, leafId, visible }: Options) {
     };
   }, [sync]);
 
-  const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
+  const reload = useCallback(() => {
+    void invoke("preview_reload", { label }).catch(() => {});
+  }, [label]);
+  const back = useCallback(() => {
+    void invoke("preview_history_back", { label }).catch(() => {});
+  }, [label]);
+  const forward = useCallback(() => {
+    void invoke("preview_history_forward", { label }).catch(() => {});
+  }, [label]);
 
-  return { hostRef, reload };
+  return { hostRef, reload, back, forward };
 }

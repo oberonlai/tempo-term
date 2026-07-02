@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TabBar } from "@/components/TabBar";
 import { TitleBar } from "@/components/TitleBar";
@@ -19,7 +19,8 @@ import { installEditorWatchSync } from "@/modules/editor/lib/editorWatch";
 import { computeLayout } from "@/modules/terminal/lib/terminalLayout";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { pruneTerminalHistory } from "@/modules/terminal/lib/terminalHistory";
-import { leafIds } from "@/modules/terminal/lib/terminalLayout";
+import { findPaneContent, leafIds } from "@/modules/terminal/lib/terminalLayout";
+import { getPreviewControls } from "@/modules/preview/lib/previewControls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { applyTheme, getTheme } from "@/themes/themes";
 import { listen } from "@tauri-apps/api/event";
@@ -72,6 +73,46 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
 }
 
+/**
+ * Controls for the preview pane the user is currently on (active tab's focused
+ * leaf), or undefined when that pane isn't a live preview. Lets the ⌘L menu
+ * accelerator and ⌘[ / ⌘] shortcuts target the right preview without stealing
+ * those keys from editors/terminals.
+ */
+function activePreviewControls() {
+  const state = useTabsStore.getState();
+  const tab = state.tabs.find((tt) => tt.id === state.activeId);
+  if (!tab) {
+    return undefined;
+  }
+  const content = findPaneContent(tab.paneTree, tab.activeLeafId);
+  if (!content || content.kind !== "preview") {
+    return undefined;
+  }
+  return getPreviewControls(tab.activeLeafId);
+}
+
+/**
+ * Subscribe to a backend event scoped to this window's webview, returning a
+ * cleanup for useEffect. Race-safe under React StrictMode: listen() is async, so
+ * the cleanup awaits its promise before unsubscribing — a mount→unmount→mount
+ * cycle can never leak a duplicate listener. A leaked duplicate is what made one
+ * ⌘W close two tabs at once. No-op when there is no Tauri webview (unit tests).
+ */
+function listenWebview(event: string, handler: () => void): () => void {
+  let promise: Promise<(() => void) | undefined> | null = null;
+  try {
+    promise = getCurrentWebview()
+      .listen(event, handler)
+      .catch(() => undefined);
+  } catch {
+    // No Tauri webview available (unit tests / web preview).
+  }
+  return () => {
+    void promise?.then((off) => off?.());
+  };
+}
+
 function App() {
   const { t } = useTranslation();
   const themeId = useSettingsStore((s) => s.themeId);
@@ -80,6 +121,43 @@ function App() {
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
+
+  // Close the focused pane, or the whole tab when it holds a single pane. Shared
+  // by the ⌘W key handler and the "Close Tab" menu item (both must behave the
+  // same, and a dirty editor routes through the unsaved-changes confirmation).
+  const closeActiveTabOrPane = useCallback(() => {
+    const tabsState = useTabsStore.getState();
+    const tab = tabsState.tabs.find((t) => t.id === tabsState.activeId);
+    if (!tab) {
+      return;
+    }
+    const panes = computeLayout(tab.paneTree);
+    const buffers = useEditorStore.getState().buffers;
+    if (panes.length <= 1) {
+      if (tabHasDirtyEditor(tab, buffers)) {
+        setPendingCloseAction(() => () => tabsState.closeTab(tab.id));
+      } else {
+        tabsState.closePaneOrTab();
+      }
+    } else {
+      // Close the currently focused pane; fall back to the bottom-right
+      // pane if the active leaf is somehow stale.
+      const target =
+        panes.find((p) => p.id === tab.activeLeafId) ??
+        panes.reduce((a, b) => {
+          if (b.rect.top !== a.rect.top) return b.rect.top > a.rect.top ? b : a;
+          return b.rect.left > a.rect.left ? b : a;
+        });
+      const targetBuf =
+        target.content.kind === "editor" ? buffers[target.content.path] : undefined;
+      const targetDirty = targetBuf ? targetBuf.content !== targetBuf.baseline : false;
+      if (targetDirty) {
+        setPendingCloseAction(() => () => tabsState.closePane(tab.id, target.id));
+      } else {
+        tabsState.closePane(tab.id, target.id);
+      }
+    }
+  }, []);
 
   useWatchSessions();
   useWatchNotes();
@@ -234,13 +312,10 @@ function App() {
         return;
       }
 
-      // ⌘` cycles focus through the panes of the active tab (⌘~ works too, since
-      // both sit on the Backquote key). No-op with one pane.
-      if (e.code === "Backquote" && !e.altKey && !editable) {
-        e.preventDefault();
-        useTabsStore.getState().focusNextPane();
-        return;
-      }
+      // ⌘` (cycle panes) is intentionally NOT handled here — it is driven by the
+      // "Cycle Pane" menu accelerator (see the listener below), which fires even
+      // when a native preview webview holds focus and would swallow the keydown.
+      // Handling it here too would advance the pane twice per press.
 
       // Zoom the whole UI. `code` is used so it works regardless of layout/Shift:
       // the "=" key (⌘= or ⌘+) zooms in, "-" zooms out, "0" resets to 100%.
@@ -262,6 +337,23 @@ function App() {
         }
       }
 
+      // ⌘[ / ⌘] step the active preview's history back/forward. Only acts on a
+      // preview pane, so editors/terminals keep these keys. (When the native
+      // preview webview holds focus, an injected script handles them instead —
+      // this covers the case where the app webview has focus.)
+      if ((e.code === "BracketLeft" || e.code === "BracketRight") && !e.altKey && !e.shiftKey) {
+        const controls = activePreviewControls();
+        if (controls) {
+          e.preventDefault();
+          if (e.code === "BracketLeft") {
+            controls.back();
+          } else {
+            controls.forward();
+          }
+          return;
+        }
+      }
+
       const key = e.key.toLowerCase();
       if (key === "t") {
         e.preventDefault();
@@ -272,39 +364,6 @@ function App() {
             .newTerminalTab(useWorkspaceStore.getState().rootPath ?? undefined);
         } else {
           useTabsStore.getState().openLauncherTab();
-        }
-      } else if (key === "w") {
-        e.preventDefault();
-        const tabsState = useTabsStore.getState();
-        const tab = tabsState.tabs.find((t) => t.id === tabsState.activeId);
-        if (!tab) {
-          return;
-        }
-        const panes = computeLayout(tab.paneTree);
-        const buffers = useEditorStore.getState().buffers;
-        if (panes.length <= 1) {
-          if (tabHasDirtyEditor(tab, buffers)) {
-            setPendingCloseAction(() => () => tabsState.closeTab(tab.id));
-          } else {
-            tabsState.closePaneOrTab();
-          }
-        } else {
-          // Close the currently focused pane; fall back to the bottom-right
-          // pane if the active leaf is somehow stale.
-          const target =
-            panes.find((p) => p.id === tab.activeLeafId) ??
-            panes.reduce((a, b) => {
-              if (b.rect.top !== a.rect.top) return b.rect.top > a.rect.top ? b : a;
-              return b.rect.left > a.rect.left ? b : a;
-            });
-          const targetBuf =
-            target.content.kind === "editor" ? buffers[target.content.path] : undefined;
-          const targetDirty = targetBuf ? targetBuf.content !== targetBuf.baseline : false;
-          if (targetDirty) {
-            setPendingCloseAction(() => () => tabsState.closePane(tab.id, target.id));
-          } else {
-            tabsState.closePane(tab.id, target.id);
-          }
         }
       } else if (key === "p") {
         e.preventDefault();
@@ -324,6 +383,31 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // ⌘W closes the active tab/pane. It is driven solely by the "Close Tab" menu
+  // accelerator, NOT a keydown branch: the native menu fires even when a preview
+  // webview holds focus, and having both a keydown handler and the menu
+  // accelerator respond to one ⌘W press would close two tabs at once. The
+  // backend emits scoped to this window's label, so a ⌘W in one window never
+  // closes a tab in another.
+  useEffect(
+    () => listenWebview("menu:close-tab", () => closeActiveTabOrPane()),
+    [closeActiveTabOrPane],
+  );
+
+  // ⌘L focuses the active preview pane's address bar. Driven by a menu
+  // accelerator so it works even while the native preview webview holds focus.
+  useEffect(
+    () => listenWebview("menu:preview-open-location", () => activePreviewControls()?.focusAddressBar()),
+    [],
+  );
+
+  // ⌘` cycles focus through the active tab's panes. Menu-accelerator driven for
+  // the same reason as ⌘W / ⌘L above.
+  useEffect(
+    () => listenWebview("menu:focus-next-pane", () => useTabsStore.getState().focusNextPane()),
+    [],
+  );
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-fg">

@@ -8,7 +8,6 @@ import { fileUrl } from "@/modules/explorer/lib/dragEntry";
 import {
   computeLayout,
   findPaneContent,
-  firstLeafId,
   gridLayout,
   leaf,
   leafIds,
@@ -155,6 +154,12 @@ interface TabsState {
    * retitle the tab to the new host.
    */
   navigatePreview: (tabId: string, leafId: string, url: string) => void;
+  /**
+   * Retitle a tab from a preview page's real `<title>`. Applies only when the
+   * preview is the tab's whole content (single pane, not user-renamed), and
+   * ignores empty titles.
+   */
+  setPreviewTabTitle: (tabId: string, leafId: string, title: string) => void;
   /** Replace a pane's content in place (used when dropping a file onto it). */
   setPaneContent: (tabId: string, leafId: string, content: PaneContent) => void;
   /** Remember a terminal pane's current working directory for session restore. */
@@ -937,6 +942,28 @@ export const useTabsStore = create<TabsState>()(
     return newId;
   },
 
+  setPreviewTabTitle: (tabId, leafId, title) =>
+    set((state) => {
+      const trimmed = title.trim();
+      const tab = state.tabs.find((t) => t.id === tabId);
+      if (!tab || trimmed === "" || tab.title === trimmed) {
+        return state;
+      }
+      const current = findPaneContent(tab.paneTree, leafId);
+      if (!current || current.kind !== "preview") {
+        return state;
+      }
+      // The tab title follows the previewed page only when the preview fills the
+      // whole tab and the user hasn't given it a name of their own.
+      const isWholeTab = leafIds(tab.paneTree).length === 1;
+      if (!isWholeTab || tab.renamed) {
+        return state;
+      }
+      return {
+        tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, title: trimmed } : t)),
+      };
+    }),
+
   setPaneContent: (tabId, leafId, content) =>
     set((state) => ({
       tabs: state.tabs.map((tab) =>
@@ -1022,8 +1049,14 @@ export const useTabsStore = create<TabsState>()(
         }
         return { tabs, activeId };
       }
+      // When the focused pane is the one closing, move focus to the LAST
+      // remaining pane (reading order) rather than the first, so closing a pane
+      // keeps focus near where it was instead of jumping to the leftmost pane.
+      const remaining = leafIds(paneTree);
       const activeLeafId =
-        tab.activeLeafId === leafId ? (firstLeafId(paneTree) ?? tab.activeLeafId) : tab.activeLeafId;
+        tab.activeLeafId === leafId
+          ? (remaining[remaining.length - 1] ?? tab.activeLeafId)
+          : tab.activeLeafId;
       return {
         tabs: state.tabs.map((t) =>
           t.id === tabId
