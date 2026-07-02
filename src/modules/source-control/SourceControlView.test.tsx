@@ -251,6 +251,22 @@ describe("SourceControlView nested folder tree", () => {
     expect(screen.queryByText("x.ts")).not.toBeInTheDocument();
     expect(screen.queryByText("aaa")).not.toBeInTheDocument();
   });
+
+  it("gives same-named folders at different paths distinct collapse-button labels", async () => {
+    vi.mocked(gitBridge.gitStatus).mockResolvedValue({
+      branch: "main",
+      staged: [],
+      unstaged: [{ path: "frontend/src/a.ts", staged: false, status: "M" }, { path: "backend/src/b.ts", staged: false, status: "M" }],
+    });
+    render(<SourceControlView />);
+    fireEvent.click(screen.getByRole("button", { name: "Group by folder" }));
+    await screen.findAllByText("src");
+
+    // Two folders share the leaf name "src" (frontend/src, backend/src) —
+    // each collapse button must carry a distinct, path-qualified label.
+    expect(screen.getByRole("button", { name: "Collapse frontend/src" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse backend/src" })).toBeInTheDocument();
+  });
 });
 
 describe("SourceControlView refresh feedback", () => {

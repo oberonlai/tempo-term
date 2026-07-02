@@ -41,6 +41,7 @@ import {
 } from "./lib/gitBridge";
 import { Tooltip } from "@/components/Tooltip";
 import { buildFileTree, collectDescendantFiles, type TreeNode } from "@/lib/fileTree";
+import { useCollapsedPaths } from "@/lib/useCollapsedPaths";
 import { usePendingGraphSelectionStore } from "@/modules/git-graph/lib/pendingGraphSelectionStore";
 import { generateCommitMessage } from "./lib/aiCommit";
 import { withMinDuration } from "@/lib/withMinDuration";
@@ -342,8 +343,8 @@ function FileTreeRows({
                 onClick={() => onToggleCollapse(node.path)}
                 aria-label={
                   isCollapsed
-                    ? t("expandFolder", { name: node.name })
-                    : t("collapseFolder", { name: node.name })
+                    ? t("expandFolder", { name: node.path })
+                    : t("collapseFolder", { name: node.path })
                 }
                 className="flex shrink-0 items-center text-fg-subtle hover:text-fg"
               >
@@ -418,7 +419,7 @@ function FileList({
   onFileOpen: (path: string) => void;
   onRequestDiscard?: (path: string) => void;
 }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const { collapsed, toggle: toggleFolder } = useCollapsedPaths();
 
   if (viewMode === "flat") {
     return (
@@ -437,18 +438,6 @@ function FileList({
         ))}
       </ul>
     );
-  }
-
-  function toggleFolder(path: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
   }
 
   return (

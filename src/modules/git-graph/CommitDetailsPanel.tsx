@@ -5,6 +5,7 @@ import { Resizer } from "@/components/Resizer";
 import { Tooltip } from "@/components/Tooltip";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { buildFileTree, type TreeNode } from "@/lib/fileTree";
+import { useCollapsedPaths } from "@/lib/useCollapsedPaths";
 import { gitCommitDetails, gitCommitFileDiff } from "./lib/gitGraphBridge";
 import { parseDiffLines } from "./lib/parseDiff";
 import { useVirtualRows } from "./lib/useVirtualRows";
@@ -122,7 +123,7 @@ function DetailsTreeRows({
               type="button"
               onClick={() => onToggleCollapse(node.path)}
               aria-label={
-                isCollapsed ? labels.expandFolder(node.name) : labels.collapseFolder(node.name)
+                isCollapsed ? labels.expandFolder(node.path) : labels.collapseFolder(node.path)
               }
               style={{ height: `${FILE_ROW_HEIGHT}px`, paddingLeft: `${depth * 14 + 8}px` }}
               className="flex w-full items-center gap-1 pr-2 text-left font-mono text-[13px] text-fg-subtle hover:bg-bg-elevated/50"
@@ -156,7 +157,11 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
   const [diffText, setDiffText] = useState("");
   const [tab, setTab] = useState<"diff" | "ai">("diff");
   const [filesViewMode, setFilesViewMode] = useState<FilesViewMode>("flat");
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const {
+    collapsed: collapsedFolders,
+    toggle: toggleDetailsFolder,
+    reset: resetCollapsedFolders,
+  } = useCollapsedPaths();
   const [leftWidth, setLeftWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem("tempoterm-gitgraph-details-left-width"));
     return Number.isFinite(v) && v > 0 ? v : 280;
@@ -183,7 +188,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     setDetails(null);
     setSelectedFile(null);
     setDiffLines([]);
-    setCollapsedFolders(new Set());
+    resetCollapsedFolders();
     gitCommitDetails(repo, commit.hash)
       .then((d) => {
         if (cancelled) {
@@ -200,7 +205,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     return () => {
       cancelled = true;
     };
-  }, [repo, commit.hash]);
+  }, [repo, commit.hash, resetCollapsedFolders]);
 
   // Lazily load the selected file's diff (both parsed lines and raw text), and
   // reset to the Diff tab when the file changes.
@@ -244,18 +249,6 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     { listRef: fileListRef },
   );
   const visibleFiles = files.slice(filesWindow.start, filesWindow.end);
-
-  function toggleDetailsFolder(path: string) {
-    setCollapsedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-bg">
