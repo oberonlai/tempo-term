@@ -24,6 +24,7 @@ import { SourceControlView } from "./SourceControlView";
 import * as gitBridge from "./lib/gitBridge";
 import type { GitStatus } from "./lib/gitBridge";
 import { useTabsStore } from "@/stores/tabsStore";
+import { usePendingGraphSelectionStore } from "@/modules/git-graph/lib/pendingGraphSelectionStore";
 
 const STATUS_ONE_MODIFIED: GitStatus = {
   branch: "main",
@@ -287,5 +288,37 @@ describe("SourceControlView refresh feedback", () => {
     expect(
       screen.getByRole("button", { name: /refresh/i }).querySelector(".animate-spin"),
     ).toBeNull();
+  });
+});
+
+describe("SourceControlView commit jump", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(gitBridge.gitResolveRepo).mockResolvedValue("/repo");
+    vi.mocked(gitBridge.gitStatus).mockResolvedValue({ branch: "main", staged: [], unstaged: [] });
+    vi.mocked(gitBridge.gitLog).mockResolvedValue([
+      { id: "abc1234", summary: "feat: x", author: "a", timestamp: 1 },
+    ]);
+    useWorkspaceStore.getState().setRoot("/repo");
+    useTabsStore.setState({ tabs: [], activeId: null, spaces: [], activeSpaceId: null });
+    usePendingGraphSelectionStore.setState({ hash: null });
+  });
+
+  it("opens the Git Graph tab and requests selection of the clicked commit", async () => {
+    render(<SourceControlView />);
+    fireEvent.click(await screen.findByText("feat: x"));
+
+    expect(usePendingGraphSelectionStore.getState().hash).toBe("abc1234");
+    const tabs = useTabsStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].kind).toBe("git-graph");
+  });
+
+  it("offers the same jump from the context menu", async () => {
+    render(<SourceControlView />);
+    fireEvent.contextMenu(await screen.findByText("feat: x"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View in Git Graph" }));
+
+    expect(usePendingGraphSelectionStore.getState().hash).toBe("abc1234");
   });
 });

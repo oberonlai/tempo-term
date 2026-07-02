@@ -41,6 +41,7 @@ import {
 } from "./lib/gitBridge";
 import { Tooltip } from "@/components/Tooltip";
 import { buildFileTree, collectDescendantFiles, type TreeNode } from "@/lib/fileTree";
+import { usePendingGraphSelectionStore } from "@/modules/git-graph/lib/pendingGraphSelectionStore";
 import { generateCommitMessage } from "./lib/aiCommit";
 import { withMinDuration } from "@/lib/withMinDuration";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -214,13 +215,20 @@ function StatusRow({
 function HistoryRow({ commit }: { commit: CommitInfo }) {
   const { t } = useTranslation("sourceControl");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  function viewInGraph() {
+    usePendingGraphSelectionStore.getState().request(commit.id);
+    useTabsStore.getState().openGitGraphTab();
+  }
+
   return (
     <li
+      onClick={viewInGraph}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
-      className="py-1 text-xs"
+      className="cursor-pointer py-1 text-xs hover:bg-bg-elevated/60"
     >
       <span className="font-mono text-fg-subtle">{commit.id}</span>
       <span className="ml-2 text-fg-muted">{commit.summary}</span>
@@ -230,17 +238,24 @@ function HistoryRow({ commit }: { commit: CommitInfo }) {
           y={menu.y}
           items={[
             {
+              id: "viewInGraph",
+              label: t("menuViewInGraph"),
+              icon: GitCompare,
+              group: 0,
+              onSelect: viewInGraph,
+            },
+            {
               id: "copyHash",
               label: t("menuCopyHash"),
               icon: Clipboard,
-              group: 0,
+              group: 1,
               onSelect: () => void navigator.clipboard.writeText(commit.id),
             },
             {
               id: "copyMessage",
               label: t("menuCopyMessage"),
               icon: ClipboardList,
-              group: 0,
+              group: 1,
               onSelect: () => void navigator.clipboard.writeText(commit.summary),
             },
           ]}

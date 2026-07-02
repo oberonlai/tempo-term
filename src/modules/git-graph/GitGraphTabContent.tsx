@@ -27,6 +27,7 @@ import {
   gitTagDelete,
 } from "./lib/gitGraphBridge";
 import { GitGraphToolbar, type GitGraphToolbarLabels } from "./GitGraphToolbar";
+import { usePendingGraphSelectionStore } from "./lib/pendingGraphSelectionStore";
 import { filterCommits } from "./lib/filterCommits";
 import { buildCommitMenu, buildRefMenu } from "./lib/contextMenuItems";
 import { splitRemoteRef } from "./lib/remoteRef";
@@ -203,6 +204,34 @@ export function GitGraphTabContent() {
     setLimit(next);
     void reload(repo, next, options);
   }, [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes, options.order]);
+
+  // Consume a pending "select this commit" request from the sidebar's history
+  // list. If the commit isn't in the currently loaded page, page in more
+  // history (capped) before giving up silently — this only fails when the
+  // commit belongs to a branch/filter the graph isn't currently showing.
+  const pendingSelectionAttempts = useRef(0);
+  useEffect(() => {
+    const pendingHash = usePendingGraphSelectionStore.getState().hash;
+    if (!pendingHash || commits.length === 0) {
+      return;
+    }
+    const match = commits.find(
+      (c) => c.hash.startsWith(pendingHash) || pendingHash.startsWith(c.hash),
+    );
+    if (match) {
+      setSelected(match);
+      usePendingGraphSelectionStore.getState().consume();
+      pendingSelectionAttempts.current = 0;
+      return;
+    }
+    if (hasMore && pendingSelectionAttempts.current < 5) {
+      pendingSelectionAttempts.current += 1;
+      loadMore();
+    } else {
+      usePendingGraphSelectionStore.getState().consume();
+      pendingSelectionAttempts.current = 0;
+    }
+  }, [commits, hasMore, loadMore]);
 
   // Turning remotes off hides remote branches; if one was selected, fall back
   // to Show All so the dropdown value and selectedBranch stay in sync.
