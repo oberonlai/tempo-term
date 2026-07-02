@@ -472,10 +472,13 @@ pub fn file_at_rev(repo_path: &str, rev: &str, path: &str) -> Result<String, Str
         // `git show` wording varies by rev kind and version; match the known
         // "no such file at that rev" messages so a genuine failure (corrupt
         // object, bad repo) still surfaces instead of reading as empty.
+        // "invalid object name 'HEAD'" is the unborn-HEAD case (fresh repo,
+        // nothing committed yet): every file is new, so HEAD-side is empty.
         Err(err)
             if err.contains("does not exist")
                 || err.contains("exists on disk, but not in")
-                || err.contains("is in the index, but not at stage") =>
+                || err.contains("is in the index, but not at stage")
+                || err.contains("invalid object name 'HEAD'") =>
         {
             Ok(String::new())
         }
@@ -1464,6 +1467,22 @@ mod tests {
         assert_eq!(file_at_rev(&path, ":", "nope.txt").unwrap(), "");
         assert!(file_at_rev(&path, "HEAD~1", "a.txt").is_err());
         assert!(file_at_rev(&path, "HEAD", "--evil").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_at_rev_unborn_head_reads_as_empty() {
+        let dir = temp_repo_dir("file_at_rev_unborn");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "staged\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+
+        // No commits yet: HEAD is unborn, so the HEAD side is an empty doc
+        // (all-added diff), not an error.
+        assert_eq!(file_at_rev(&path, "HEAD", "a.txt").unwrap(), "");
+        assert_eq!(file_at_rev(&path, ":", "a.txt").unwrap(), "staged\n");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

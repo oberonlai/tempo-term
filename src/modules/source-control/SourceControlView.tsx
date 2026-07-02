@@ -20,6 +20,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { InfoDialog } from "@/components/InfoDialog";
 import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { fsReveal } from "@/modules/explorer/lib/fsBridge";
 import {
@@ -366,6 +367,8 @@ export function SourceControlView() {
   const openDiffTab = useTabsStore((s) => s.openDiffTab);
   // Repo-relative path of the file awaiting discard confirmation, if any.
   const [discardTarget, setDiscardTarget] = useState<string | null>(null);
+  // Basename of a file whose discard failed, shown in an error dialog.
+  const [discardError, setDiscardError] = useState<string | null>(null);
 
   // Rows report repo-relative paths; the diff tab (like the editor) wants an
   // absolute path so it can resolve the repo on its own.
@@ -468,10 +471,16 @@ export function SourceControlView() {
 
   return (
     // Suppress the WebView's own context menu anywhere in the panel; rows
-    // layer the app ContextMenu on top via their own handlers.
+    // layer the app ContextMenu on top via their own handlers. Text inputs
+    // keep the native menu — it's how right-click paste works.
     <div
       className="flex h-full flex-col bg-bg-inset"
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        const el = e.target as HTMLElement;
+        if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) {
+          e.preventDefault();
+        }
+      }}
     >
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
@@ -660,9 +669,23 @@ export function SourceControlView() {
           onConfirm={() => {
             const target = discardTarget;
             setDiscardTarget(null);
-            void withRepo((repo) => gitRestoreFile(repo, target));
+            // A destructive action must never fail silently: surface the
+            // error and refresh so the list reflects whatever really happened.
+            withRepo((repo) => gitRestoreFile(repo, target)).catch(() => {
+              setDiscardError(basename(target));
+              void refresh();
+            });
           }}
           onCancel={() => setDiscardTarget(null)}
+        />
+      )}
+
+      {discardError && (
+        <InfoDialog
+          title={t("discardTitle")}
+          message={t("discardFailed", { name: discardError })}
+          confirmLabel={tCommon("actions.confirm")}
+          onConfirm={() => setDiscardError(null)}
         />
       )}
     </div>

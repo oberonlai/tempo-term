@@ -64,6 +64,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       ref={menuRef}
       role="menu"
       style={{ position: "fixed", left: x, top: y }}
+      // Portal events still bubble through the REACT tree, so without this a
+      // menu-item click would also fire the owning row's onClick (e.g. a
+      // source-control row opening its diff tab on "Copy Path").
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       className="z-[200] min-w-[200px] overflow-hidden rounded-md border border-border-strong bg-bg-elevated py-1 text-[13px] shadow-lg"
     >
       {items.map((item, index) => {

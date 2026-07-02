@@ -75,6 +75,16 @@ describe("SourceControlView row interactions", () => {
     expect(screen.getByRole("menuitem", { name: "Discard Changes" })).toBeInTheDocument();
   });
 
+  it("does not open a diff tab when a context-menu item is clicked", async () => {
+    // jsdom has no clipboard; the menu action calls writeText.
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<SourceControlView />);
+    fireEvent.contextMenu(await screen.findByText("src/a.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
+
+    expect(useTabsStore.getState().tabs).toHaveLength(0);
+  });
+
   it("stages the file from the context menu", async () => {
     render(<SourceControlView />);
     fireEvent.contextMenu(await screen.findByText("src/a.ts"));

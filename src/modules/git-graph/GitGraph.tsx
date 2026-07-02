@@ -209,11 +209,15 @@ export function GitGraph({
               // The HEAD commit is marked at its graph node (filled accent + glow);
               // its row stays calm and only brightens to full foreground, so the
               // list reads uniformly. Selection keeps its own filled style.
+              // Hover styles use group-hover: the hit area (outer div) spans
+              // the full row including the lane gutter, while the painted
+              // background (inner div) starts after the lanes so the SVG
+              // branch lines are never covered.
               const rowState = isSelected
                 ? "border-border-strong bg-bg-elevated text-fg shadow-sm"
                 : isCurrent
-                  ? "border-transparent text-fg hover:bg-bg-elevated/50"
-                  : "border-transparent text-fg-muted hover:bg-bg-elevated/50 hover:text-fg";
+                  ? "border-transparent text-fg group-hover:bg-bg-elevated/50"
+                  : "border-transparent text-fg-muted group-hover:bg-bg-elevated/50 group-hover:text-fg";
               return (
                 <div
                   key={commit.hash}
@@ -226,11 +230,11 @@ export function GitGraph({
                     height: `${ROW_HEIGHT}px`,
                     top: `${layout.y - ROW_HEIGHT / 2}px`,
                   }}
-                  // Spans the full width (including the lane gutter) so a
-                  // click beside the node dot still opens the commit; the
-                  // text content stays where left-[100px] used to put it.
-                  className={`absolute left-0 right-4 flex cursor-pointer items-center justify-between rounded border py-1 pl-[112px] pr-3 transition-all ${rowState}`}
+                  className="group absolute left-0 right-4 cursor-pointer"
                 >
+                  <div
+                    className={`ml-[100px] flex h-full items-center justify-between rounded border py-1 pl-3 pr-3 transition-all ${rowState}`}
+                  >
                   <div className="flex items-center space-x-3 overflow-hidden pr-2">
                     <span className="select-all font-mono text-xs font-semibold text-accent">
                       {commit.hash}
@@ -288,6 +292,7 @@ export function GitGraph({
                       <Clock className="h-3 w-3" />
                       <span>{commit.date}</span>
                     </div>
+                  </div>
                   </div>
                 </div>
               );

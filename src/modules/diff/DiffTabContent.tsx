@@ -64,7 +64,11 @@ export function DiffTabContent({ path, staged }: DiffTabContentProps) {
         );
         if (!cancelled) {
           setError(false);
-          setDocs({ left, right });
+          // Keep the previous object when nothing changed so the MergeView
+          // effect doesn't tear down and lose scroll position on refocus.
+          setDocs((prev) =>
+            prev && prev.left === left && prev.right === right ? prev : { left, right },
+          );
         }
       } catch {
         if (!cancelled) {

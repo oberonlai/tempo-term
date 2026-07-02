@@ -157,8 +157,12 @@ export function PaneTabContent({ tab }: { tab: Tab }) {
     : undefined;
 
   // Single-file panes reject folders; terminal/note take both. Dropping a file
-  // onto a launcher pane opens it, so a launcher accepts a file too.
+  // onto a launcher pane opens it, so a launcher accepts a file too. A diff
+  // pane is a read-only comparison with no drop action, so it accepts nothing.
   function canDrop(content: PaneContent, entry: DraggedEntry): boolean {
+    if (content.kind === "diff") {
+      return false;
+    }
     if (
       content.kind === "editor" ||
       content.kind === "preview" ||

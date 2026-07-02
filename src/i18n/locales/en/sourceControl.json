@@ -37,5 +37,6 @@
   "menuCopyRelativePath": "Copy Relative Path",
   "menuRevealFinder": "Reveal in Finder",
   "menuCopyHash": "Copy Hash",
-  "menuCopyMessage": "Copy Message"
+  "menuCopyMessage": "Copy Message",
+  "discardFailed": "Couldn't discard changes to {{name}}. The file may be locked or the repository is in an unexpected state."
 }
