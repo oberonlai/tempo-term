@@ -428,7 +428,7 @@ function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: St
 
         {!editing && (
           <div className="flex shrink-0 items-center gap-0.5">
-            <Tooltip label={t("workspace.renameSpace")} side="top" className="shrink-0">
+            <Tooltip label={t("workspace.renameSpace")} className="shrink-0">
               <button
                 type="button"
                 aria-label={t("workspace.renameSpace")}
@@ -441,7 +441,7 @@ function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: St
                 <Pencil size={12} />
               </button>
             </Tooltip>
-            <Tooltip label={t("workspace.deleteSpace")} side="top" className="shrink-0">
+            <Tooltip label={t("workspace.deleteSpace")} className="shrink-0">
               <button
                 type="button"
                 aria-label={t("workspace.deleteSpace")}
@@ -451,7 +451,7 @@ function SpaceGroup({ id, name, filter }: { id: string; name: string; filter: St
                 <Trash2 size={12} />
               </button>
             </Tooltip>
-            <Tooltip label={t("workspace.addTab")} side="top" className="shrink-0">
+            <Tooltip label={t("workspace.addTab")} className="shrink-0">
               <button
                 type="button"
                 aria-label={t("workspace.addTab")}

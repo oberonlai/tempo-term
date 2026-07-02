@@ -66,7 +66,7 @@ export function TitleBar() {
     <div className="flex h-8 shrink-0 items-center border-b border-border bg-bg-inset">
       <div data-tauri-drag-region className="h-full flex-1" />
       <div className="flex h-full shrink-0 items-center">
-        <Tooltip label={t("titleBar.minimize")}>
+        <Tooltip label={t("titleBar.minimize")} side="bottom">
           <button
             type="button"
             aria-label={t("titleBar.minimize")}
@@ -76,7 +76,7 @@ export function TitleBar() {
             <Minus size={15} />
           </button>
         </Tooltip>
-        <Tooltip label={isMaximized ? t("titleBar.restore") : t("titleBar.maximize")}>
+        <Tooltip label={isMaximized ? t("titleBar.restore") : t("titleBar.maximize")} side="bottom">
           <button
             type="button"
             aria-label={isMaximized ? t("titleBar.restore") : t("titleBar.maximize")}
@@ -86,7 +86,7 @@ export function TitleBar() {
             {isMaximized ? <RestoreIcon size={11} /> : <Square size={12} />}
           </button>
         </Tooltip>
-        <Tooltip label={t("titleBar.close")}>
+        <Tooltip label={t("titleBar.close")} side="bottom">
           <button
             type="button"
             aria-label={t("titleBar.close")}

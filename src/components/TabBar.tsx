@@ -137,12 +137,12 @@ function TabItem({ id }: { id: string }) {
           className="w-28 rounded border border-accent bg-bg px-1 text-xs text-fg outline-none"
         />
       ) : (
-        <Tooltip label={tab.title} className="min-w-0">
+        <Tooltip label={tab.title} side="bottom" className="min-w-0">
           <span className="max-w-[160px] truncate">{tab.title}</span>
         </Tooltip>
       )}
       {/* The ✕ glyph is self-explanatory; only the dirty dot needs a hint. */}
-      <Tooltip label={dirty ? t("editor:unsaved") : undefined}>
+      <Tooltip label={dirty ? t("editor:unsaved") : undefined} side="bottom">
         <button
           type="button"
           aria-label={dirty ? t("editor:unsaved") : t("actions.closeTab")}
@@ -245,7 +245,7 @@ export function TabBar() {
         IS_MAC ? "pl-20" : "pl-3"
       }`}
     >
-      <Tooltip label={t("workspace.toggleSidebar")} className="shrink-0">
+      <Tooltip label={t("workspace.toggleSidebar")} side="bottom" className="shrink-0">
         <button
           type="button"
           aria-label={t("workspace.toggleSidebar")}
@@ -284,7 +284,7 @@ export function TabBar() {
             ))}
           </SortableContext>
           {tabBarHover !== null && tabBarHover.insertBeforeId === null && <TabInsertionLine />}
-          <Tooltip label={t("workspace.addTab")} className="shrink-0">
+          <Tooltip label={t("workspace.addTab")} side="bottom" className="shrink-0">
             <button
               type="button"
               aria-label={t("workspace.addTab")}

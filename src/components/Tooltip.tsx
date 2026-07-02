@@ -23,7 +23,10 @@ const DEFAULT_DELAY_MS = 300;
  */
 export function Tooltip({
   label,
-  side = "bottom",
+  // Top by default: the cursor arrow extends down-right, so a tooltip below
+  // the anchor sits under the pointer. Only top-of-window chrome (tab bar,
+  // title bar, sidebar icon strip) opens downward.
+  side = "top",
   delayMs = DEFAULT_DELAY_MS,
   className,
   children,
