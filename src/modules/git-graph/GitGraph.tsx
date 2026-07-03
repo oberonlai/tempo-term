@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clock, GitBranch, Tag, User } from "lucide-react";
 import { Tooltip } from "@/components/Tooltip";
-import type { CommitNode, CommitRef } from "./types";
+import type { CommitNode, CommitRef, GraphSelection } from "./types";
 import {
   computeGraphLayout,
   DEFAULT_GEOMETRY,
   edgePath,
+  firstParentRowIndex,
+  laneContinuationRowIndex,
 } from "./lib/graphLayout";
 import { isCurrentCommit } from "./lib/currentCommit";
 import { BRANCH_COLORS } from "./lib/branchColors";
+import { usePendingGraphSelectionStore } from "./lib/pendingGraphSelectionStore";
 
 export interface GitGraphLabels {
   emptyTitle: string;
@@ -19,8 +22,8 @@ export interface GitGraphLabels {
 
 interface GitGraphProps {
   commits: CommitNode[];
-  selectedCommit: CommitNode | null;
-  onSelectCommit: (commit: CommitNode) => void;
+  selection: GraphSelection | null;
+  onSelectCommit: (commit: CommitNode, options: { shiftKey: boolean }) => void;
   onCommitContextMenu?: (commit: CommitNode, x: number, y: number) => void;
   onRefContextMenu?: (ref: CommitRef, x: number, y: number) => void;
   hasMore?: boolean;
@@ -44,7 +47,7 @@ const PADDING_TOP = DEFAULT_GEOMETRY.paddingTop;
 
 export function GitGraph({
   commits,
-  selectedCommit,
+  selection,
   onSelectCommit,
   onCommitContextMenu,
   onRefContextMenu,
@@ -74,6 +77,64 @@ export function GitGraph({
 
   const { layouts, edges } = useMemo(() => computeGraphLayout(commits), [commits]);
 
+  const activeHash =
+    selection?.mode === "single"
+      ? selection.commit.hash
+      : selection?.mode === "compare"
+        ? selection.to.hash
+        : null;
+
+  const isSelectedHash = (hash: string) =>
+    selection?.mode === "compare"
+      ? hash === selection.from.hash || hash === selection.to.hash
+      : hash === activeHash;
+
+  function selectFromClick(commit: CommitNode, event: { shiftKey: boolean }) {
+    scrollRef.current?.focus();
+    onSelectCommit(commit, { shiftKey: event.shiftKey });
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (commits.length === 0 || !activeHash) {
+      return;
+    }
+    const currentIndex = commits.findIndex((c) => c.hash === activeHash);
+    if (currentIndex === -1) {
+      return;
+    }
+    if (event.key === "ArrowDown" && !event.shiftKey) {
+      event.preventDefault();
+      const targetIndex = Math.min(currentIndex + 1, commits.length - 1);
+      if (targetIndex !== currentIndex) {
+        onSelectCommit(commits[targetIndex], { shiftKey: false });
+      }
+    } else if (event.key === "ArrowUp" && !event.shiftKey) {
+      event.preventDefault();
+      const targetIndex = Math.max(currentIndex - 1, 0);
+      if (targetIndex !== currentIndex) {
+        onSelectCommit(commits[targetIndex], { shiftKey: false });
+      }
+    } else if (event.key === "ArrowDown" && event.shiftKey) {
+      event.preventDefault();
+      const parentHash = commits[currentIndex].parents[0];
+      if (!parentHash) {
+        return;
+      }
+      const targetIndex = firstParentRowIndex(commits, currentIndex);
+      if (targetIndex !== null) {
+        onSelectCommit(commits[targetIndex], { shiftKey: false });
+      } else {
+        usePendingGraphSelectionStore.getState().request(parentHash);
+      }
+    } else if (event.key === "ArrowUp" && event.shiftKey) {
+      event.preventDefault();
+      const targetIndex = laneContinuationRowIndex(edges, currentIndex);
+      if (targetIndex !== null) {
+        onSelectCommit(commits[targetIndex], { shiftKey: false });
+      }
+    }
+  }
+
   const svgHeight = commits.length * ROW_HEIGHT + PADDING_TOP * 2 - 20;
   const visibleStart = Math.max(
     0,
@@ -99,7 +160,9 @@ export function GitGraph({
     <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-bg">
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="flex-1 overflow-auto outline-none"
         onScroll={(event) => {
           const target = event.currentTarget;
           setViewport({ scrollTop: target.scrollTop, height: target.clientHeight });
@@ -145,13 +208,13 @@ export function GitGraph({
                 return null;
               }
               const color = BRANCH_COLORS[layout.colorIndex % BRANCH_COLORS.length];
-              const isSelected = selectedCommit?.hash === commit.hash;
+              const isSelected = isSelectedHash(commit.hash);
               const isCurrent = isCurrentCommit(commit);
               return (
                 <Tooltip key={commit.hash} label={commit.hash}>
                   <button
                     type="button"
-                    onClick={() => onSelectCommit(commit)}
+                    onClick={(e) => selectFromClick(commit, e)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       onCommitContextMenu?.(commit, e.clientX, e.clientY);
@@ -188,7 +251,7 @@ export function GitGraph({
               if (!layout) {
                 return null;
               }
-              const isSelected = selectedCommit?.hash === commit.hash;
+              const isSelected = isSelectedHash(commit.hash);
               const isCurrent = isCurrentCommit(commit);
               // The HEAD commit is marked at its graph node (filled accent + glow);
               // its row stays calm and only brightens to full foreground, so the
@@ -204,7 +267,7 @@ export function GitGraph({
               return (
                 <div
                   key={commit.hash}
-                  onClick={() => onSelectCommit(commit)}
+                  onClick={(e) => selectFromClick(commit, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     onCommitContextMenu?.(commit, e.clientX, e.clientY);
