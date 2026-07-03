@@ -46,9 +46,11 @@ interface TreeNodeProps {
   onReloadParent: () => void;
   /** Increments when the header's collapse-all button fires; folds this node. */
   collapseSignal?: number;
+  /** Increments when the header's expand-all button fires; unfolds this node. */
+  expandSignal?: number;
 }
 
-function TreeNode({ entry, depth, onReloadParent, collapseSignal }: TreeNodeProps) {
+function TreeNode({ entry, depth, onReloadParent, collapseSignal, expandSignal }: TreeNodeProps) {
   const { t } = useTranslation("explorer");
   const { t: tCommon } = useTranslation("common");
   const [expanded, setExpanded] = useState(false);
@@ -67,6 +69,17 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal }: TreeNodeProp
       setExpanded(false);
     }
   }, [collapseSignal]);
+
+  // Mirrors the collapse-all effect above. Runs on mount too, which is what
+  // makes it cascade into lazily-loaded children: expanding a node here
+  // mounts its child TreeNodes with the same (already-nonzero) expandSignal,
+  // so each of them expands itself in turn as soon as it appears. (expand()
+  // itself is a no-op for files, so no is_dir check is needed here.)
+  useEffect(() => {
+    if (expandSignal) {
+      void expand();
+    }
+  }, [expandSignal]);
 
   const openFromSidebar = useTabsStore((s) => s.openFromSidebar);
   const openInNewTab = useTabsStore((s) => s.openInNewTab);
@@ -94,6 +107,9 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal }: TreeNodeProp
   }, [entry.path]);
 
   async function expand() {
+    if (!entry.is_dir) {
+      return;
+    }
     if (children === null) {
       await reloadChildren();
     }
@@ -331,6 +347,7 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal }: TreeNodeProp
               depth={depth + 1}
               onReloadParent={reloadChildren}
               collapseSignal={collapseSignal}
+              expandSignal={expandSignal}
             />
           ))}
         </ul>
@@ -407,9 +424,11 @@ interface FileTreeProps {
   onReloadRoot: () => void;
   /** Increments when the header's collapse-all button fires; folds every folder. */
   collapseSignal?: number;
+  /** Increments when the header's expand-all button fires; unfolds every folder. */
+  expandSignal?: number;
 }
 
-export function FileTree({ entries, onReloadRoot, collapseSignal }: FileTreeProps) {
+export function FileTree({ entries, onReloadRoot, collapseSignal, expandSignal }: FileTreeProps) {
   return (
     <ul className="select-none">
       {entries.map((entry) => (
@@ -419,6 +438,7 @@ export function FileTree({ entries, onReloadRoot, collapseSignal }: FileTreeProp
           depth={0}
           onReloadParent={onReloadRoot}
           collapseSignal={collapseSignal}
+          expandSignal={expandSignal}
         />
       ))}
     </ul>

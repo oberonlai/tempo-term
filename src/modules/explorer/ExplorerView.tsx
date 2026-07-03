@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CopyMinus, FolderOpen, Search } from "lucide-react";
+import { CopyMinus, CopyPlus, FolderOpen, Search } from "lucide-react";
 import { FileTree } from "./FileTree";
 import { FileFinder } from "./FileFinder";
 import { Tooltip } from "@/components/Tooltip";
@@ -19,6 +19,7 @@ export function ExplorerView() {
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [collapseSignal, setCollapseSignal] = useState(0);
+  const [expandSignal, setExpandSignal] = useState(0);
 
   // A remote (SFTP) root hides local-only controls and shows the remote path
   // rather than the raw ssh:// uri.
@@ -83,16 +84,28 @@ export function ExplorerView() {
             </>
           )}
           {rootPath && (
-            <Tooltip label={t("collapseAll")}>
-              <button
-                type="button"
-                aria-label={t("collapseAll")}
-                onClick={() => setCollapseSignal((v) => v + 1)}
-                className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
-              >
-                <CopyMinus size={15} />
-              </button>
-            </Tooltip>
+            <>
+              <Tooltip label={t("expandAll")}>
+                <button
+                  type="button"
+                  aria-label={t("expandAll")}
+                  onClick={() => setExpandSignal((v) => v + 1)}
+                  className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+                >
+                  <CopyPlus size={15} />
+                </button>
+              </Tooltip>
+              <Tooltip label={t("collapseAll")}>
+                <button
+                  type="button"
+                  aria-label={t("collapseAll")}
+                  onClick={() => setCollapseSignal((v) => v + 1)}
+                  className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+                >
+                  <CopyMinus size={15} />
+                </button>
+              </Tooltip>
+            </>
           )}
         </div>
       </div>
@@ -111,7 +124,12 @@ export function ExplorerView() {
         ) : entries.length === 0 ? (
           <p className="px-3 py-2 text-xs text-fg-subtle">{t("empty")}</p>
         ) : (
-          <FileTree entries={entries} onReloadRoot={loadEntries} collapseSignal={collapseSignal} />
+          <FileTree
+            entries={entries}
+            onReloadRoot={loadEntries}
+            collapseSignal={collapseSignal}
+            expandSignal={expandSignal}
+          />
         )}
       </div>
 

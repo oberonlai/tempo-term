@@ -107,6 +107,67 @@ describe("FileTree collapse-all", () => {
   });
 });
 
+describe("FileTree expand-all", () => {
+  it("expands a collapsed folder and loads its children when expandSignal increments", async () => {
+    const { fsReadDir } = await import("./lib/fsBridge");
+    vi.mocked(fsReadDir).mockResolvedValue([
+      { name: "child.ts", path: "/p/dir/child.ts", is_dir: false, size: 0 },
+    ]);
+    const entries = [{ name: "dir", path: "/p/dir", is_dir: true, size: 0 }];
+    const { rerender } = render(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={0} />,
+    );
+
+    expect(screen.queryByText("child.ts")).not.toBeInTheDocument();
+
+    rerender(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={1} />,
+    );
+    expect(await screen.findByText("child.ts")).toBeInTheDocument();
+  });
+
+  it("recursively expands nested folders that have not been lazily loaded yet", async () => {
+    const { fsReadDir } = await import("./lib/fsBridge");
+    vi.mocked(fsReadDir).mockImplementation(async (path: string) => {
+      if (path === "/p/dir") {
+        return [{ name: "subdir", path: "/p/dir/subdir", is_dir: true, size: 0 }];
+      }
+      if (path === "/p/dir/subdir") {
+        return [{ name: "leaf.ts", path: "/p/dir/subdir/leaf.ts", is_dir: false, size: 0 }];
+      }
+      return [];
+    });
+    const entries = [{ name: "dir", path: "/p/dir", is_dir: true, size: 0 }];
+    const { rerender } = render(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={0} />,
+    );
+
+    rerender(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={1} />,
+    );
+
+    expect(await screen.findByText("leaf.ts")).toBeInTheDocument();
+  });
+
+  it("does not fsReadDir a file entry's own path when expand-all fires", async () => {
+    const { fsReadDir } = await import("./lib/fsBridge");
+    vi.mocked(fsReadDir).mockResolvedValue([
+      { name: "child.ts", path: "/p/dir/child.ts", is_dir: false, size: 0 },
+    ]);
+    const entries = [{ name: "dir", path: "/p/dir", is_dir: true, size: 0 }];
+    const { rerender } = render(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={0} />,
+    );
+
+    rerender(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={1} />,
+    );
+    await screen.findByText("child.ts");
+
+    expect(fsReadDir).not.toHaveBeenCalledWith("/p/dir/child.ts");
+  });
+});
+
 describe("FileTree context menu: open in new tab", () => {
   beforeEach(() => {
     useTabsStore.setState({ tabs: [], activeId: null, spaces: [], activeSpaceId: null });
