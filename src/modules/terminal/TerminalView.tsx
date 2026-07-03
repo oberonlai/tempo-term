@@ -79,6 +79,7 @@ import { buildCellPositions, gatherLogicalLine } from "./lib/cellPositions";
 import { terminalKeySequence } from "./lib/terminalKeymap";
 import { shouldCdToRoot } from "./lib/cwdSync";
 import { parseOsc7Cwd } from "./lib/osc7";
+import { applyTerminalPadding } from "./lib/terminalPadding";
 import { debounce } from "@/lib/debounce";
 import { dropOverlayClassName } from "@/components/EntryDropOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
@@ -304,6 +305,11 @@ export function TerminalView({
     handleRef.current = handle;
     const { term, fit } = handle;
     term.open(container);
+    // Padding must live on term.element (read by FitAddon below), not on
+    // `container` — see applyTerminalPadding for why.
+    if (term.element) {
+      applyTerminalPadding(term.element, useSettingsStore.getState().terminalPadding);
+    }
 
     // Batch live PTY/SSH output through a frame-scheduled writer so a flood
     // (cat a huge file, runaway logs) can't block the UI thread. One-shot writes
@@ -1011,12 +1017,16 @@ export function TerminalView({
     }
   }, [themeId]);
 
-  // The pane's inner padding is configurable; re-fit so the grid recomputes.
+  // The pane's inner padding is configurable; apply it to term.element (not
+  // `container` — see applyTerminalPadding) and re-fit so the grid recomputes.
   useEffect(() => {
     const handle = handleRef.current;
     const container = containerRef.current;
     if (!handle || !container) {
       return;
+    }
+    if (handle.term.element) {
+      applyTerminalPadding(handle.term.element, terminalPadding);
     }
     if (container.clientWidth > 0 && container.clientHeight > 0) {
       try {
@@ -1254,8 +1264,6 @@ export function TerminalView({
     connectNowRef.current?.();
   }, [reconnectTrigger]);
 
-  // Match the padding gutter to the terminal's own background so the inset
-  // reads as breathing room rather than a different-coloured frame.
   function isExternalFileDrag(data: DataTransfer): boolean {
     if (getDraggedEntry()) {
       return false;
@@ -1295,11 +1303,13 @@ export function TerminalView({
   }
 
   return (
+    // No padding here: it's applied to term.element (see applyTerminalPadding)
+    // so FitAddon accounts for it. The background still matches the terminal's
+    // own so that gutter reads as breathing room, not a different-coloured frame.
     <div
       ref={containerRef}
       className="relative h-full w-full"
       style={{
-        padding: terminalPadding,
         backgroundColor: getTheme(themeId).terminal.background,
       }}
       onDragEnter={(event) => {
