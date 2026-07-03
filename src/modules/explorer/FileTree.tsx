@@ -61,12 +61,18 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal, expandSignal }
   // JS hover: CSS :hover is suppressed inside a draggable subtree (WebKit), so
   // track hover manually to highlight just this row.
   const [hovered, setHovered] = useState(false);
+  // Whether this node is currently expanded *because* of an expand-all
+  // cascade (as opposed to a manual click). expandSignal itself never
+  // resets, so this is what lets a later manual re-expand stay local
+  // instead of re-cascading into this node's children.
+  const [isExpandingAll, setIsExpandingAll] = useState(false);
 
   // Skip the initial value (0 / undefined) so a future restore-on-mount of
   // expanded state wouldn't be immediately collapsed.
   useEffect(() => {
     if (collapseSignal) {
       setExpanded(false);
+      setIsExpandingAll(false);
     }
   }, [collapseSignal]);
 
@@ -74,9 +80,15 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal, expandSignal }
   // makes it cascade into lazily-loaded children: expanding a node here
   // mounts its child TreeNodes with the same (already-nonzero) expandSignal,
   // so each of them expands itself in turn as soon as it appears. (expand()
-  // itself is a no-op for files, so no is_dir check is needed here.)
+  // itself is a no-op for files, so no is_dir check is needed here.) Only
+  // this effect ever sets isExpandingAll true; it's reset explicitly at
+  // every place a collapse happens (above, and in toggle() below) rather
+  // than via an effect on `expanded` itself, since that would also fire
+  // (and immediately undo this) on every fresh mount, where `expanded`
+  // starts out false by default.
   useEffect(() => {
     if (expandSignal) {
+      setIsExpandingAll(true);
       void expand();
     }
   }, [expandSignal]);
@@ -126,6 +138,7 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal, expandSignal }
     }
     if (expanded) {
       setExpanded(false);
+      setIsExpandingAll(false);
       return;
     }
     await expand();
@@ -347,7 +360,7 @@ function TreeNode({ entry, depth, onReloadParent, collapseSignal, expandSignal }
               depth={depth + 1}
               onReloadParent={reloadChildren}
               collapseSignal={collapseSignal}
-              expandSignal={expandSignal}
+              expandSignal={isExpandingAll ? expandSignal : undefined}
             />
           ))}
         </ul>

@@ -166,6 +166,52 @@ describe("FileTree expand-all", () => {
 
     expect(fsReadDir).not.toHaveBeenCalledWith("/p/dir/child.ts");
   });
+
+  it("does not re-cascade into a folder's unloaded descendants on a later manual expand", async () => {
+    const { fsReadDir } = await import("./lib/fsBridge");
+    vi.mocked(fsReadDir).mockImplementation(async (path: string) => {
+      if (path === "/p/dir") {
+        return [{ name: "subdir", path: "/p/dir/subdir", is_dir: true, size: 0 }];
+      }
+      if (path === "/p/dir/subdir") {
+        return [{ name: "inner", path: "/p/dir/subdir/inner", is_dir: true, size: 0 }];
+      }
+      if (path === "/p/dir/subdir/inner") {
+        return [
+          { name: "leaf.ts", path: "/p/dir/subdir/inner/leaf.ts", is_dir: false, size: 0 },
+        ];
+      }
+      return [];
+    });
+    const entries = [{ name: "dir", path: "/p/dir", is_dir: true, size: 0 }];
+    const { rerender } = render(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={0} />,
+    );
+
+    // Expand-all cascades all the way down to leaf.ts once.
+    rerender(
+      <FileTree entries={entries} onReloadRoot={() => {}} expandSignal={1} />,
+    );
+    expect(await screen.findByText("leaf.ts")).toBeInTheDocument();
+
+    // Manually collapse, then re-expand "subdir". The expandSignal prop is
+    // still the same nonzero value it was during expand-all (it never
+    // resets), so this must not auto-cascade into "inner" again.
+    fireEvent.click(screen.getByText("subdir"));
+    expect(screen.queryByText("inner")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("subdir"));
+    expect(await screen.findByText("inner")).toBeInTheDocument();
+
+    // "inner" not yet being in the DOM proves nothing on its own: if it were
+    // wrongly auto-expanding, that would happen asynchronously (its own
+    // effect awaits fsReadDir). Give that a chance to settle before
+    // asserting it never happened.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.queryByText("leaf.ts")).not.toBeInTheDocument();
+  });
 });
 
 describe("FileTree context menu: open in new tab", () => {
