@@ -167,6 +167,11 @@ export function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<TerminalHandle | null>(null);
   const sessionRef = useRef<PtySession | SshSession | null>(null);
+  // The debounced PTY-resize pusher created in the mount effect (see its
+  // comment for why it's debounced), exposed here so other effects that
+  // change the pane's size (e.g. the padding-change effect below) can share
+  // the same debounce instead of spamming the shell with their own resize.
+  const pushPtySizeRef = useRef<(() => void) | null>(null);
   const sshRef = useRef(ssh);
   sshRef.current = ssh;
   const onExitRef = useRef(onExit);
@@ -922,6 +927,7 @@ export function TerminalView({
         void session.resize(term.cols, term.rows);
       }
     }, 80);
+    pushPtySizeRef.current = pushPtySize;
     const observer = new ResizeObserver(() => {
       safeFit();
       pushPtySize();
@@ -938,6 +944,7 @@ export function TerminalView({
       writeListener.dispose();
       observer.disconnect();
       pushPtySize.cancel();
+      pushPtySizeRef.current = null;
       document.removeEventListener("keydown", onKeyDownCapture, true);
       document.removeEventListener("paste", onPasteCapture, true);
       statusOscHandler.dispose();
@@ -1017,8 +1024,13 @@ export function TerminalView({
     }
   }, [themeId]);
 
-  // The pane's inner padding is configurable; apply it to term.element (not
-  // `container` — see applyTerminalPadding) and re-fit so the grid recomputes.
+  // The pane's inner padding is configurable via a settings-panel slider,
+  // which fires this effect on every value while the user drags — apply it
+  // to term.element (not `container` — see applyTerminalPadding) and re-fit
+  // immediately so the grid keeps pace with the drag, but push the PTY resize
+  // (SIGWINCH) through the shared debounced pusher so a fast drag doesn't
+  // spam the shell with reprinted prompts (same reasoning as the ResizeObserver
+  // above).
   useEffect(() => {
     const handle = handleRef.current;
     const container = containerRef.current;
@@ -1034,7 +1046,7 @@ export function TerminalView({
       } catch {
         // ignore transient zero-size
       }
-      sessionRef.current?.resize(handle.term.cols, handle.term.rows);
+      pushPtySizeRef.current?.();
     }
   }, [terminalPadding]);
 
