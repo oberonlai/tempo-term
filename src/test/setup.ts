@@ -35,6 +35,10 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as never;
 }
 
+if (typeof HTMLElement.prototype.scrollIntoView === "undefined") {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 if (typeof window.matchMedia === "undefined") {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,

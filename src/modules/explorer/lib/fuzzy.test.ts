@@ -30,6 +30,17 @@ describe("fuzzyMatch", () => {
     const scattered = fuzzyMatch("tab", "t-a-x-b.tsx");
     expect(contiguous.score).toBeGreaterThan(scattered.score);
   });
+
+  it("matches when a space-separated query has each word appear anywhere in the target", () => {
+    // The user is thinking "the FileTree file under explorer" and types
+    // words in path order; none of those words are literally adjacent, and
+    // there is no space character in the path itself.
+    expect(fuzzyMatch("file tree", "src/modules/explorer/FileTree.tsx").matched).toBe(true);
+  });
+
+  it("does not match a space-separated query when one word is missing from the target", () => {
+    expect(fuzzyMatch("file zzzzz", "src/modules/explorer/FileTree.tsx").matched).toBe(false);
+  });
 });
 
 describe("fuzzyRank", () => {
@@ -52,5 +63,10 @@ describe("fuzzyRank", () => {
   it("orders better matches first", () => {
     const ranked = fuzzyRank("view", files);
     expect(ranked[0]).toMatch(/View\.tsx$/);
+  });
+
+  it("finds a file via a multi-word query typed in path order", () => {
+    const ranked = fuzzyRank("terminal view", files);
+    expect(ranked).toEqual(["src/modules/terminal/TerminalView.tsx"]);
   });
 });
