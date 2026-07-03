@@ -119,16 +119,22 @@ function TabItem({ id }: { id: string }) {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
-      // Same active-chip recipe as WorkspacePanel's tab cards and the
-      // settings theme/language pickers: an accent border + accent-tinted
-      // fill reads clearly in every theme, unlike the old bg-elevated-only
-      // state whose contrast against bg-inset varies a lot theme to theme.
-      className={`group flex h-7 cursor-pointer items-center gap-2 rounded-md border px-3 text-xs transition-colors ${
-        active
-          ? "border-accent bg-accent/10 text-fg"
-          : "border-transparent text-fg-muted hover:bg-bg-elevated/60"
+      // Minimal-weight active indicator: a small accent dot at the leading
+      // edge plus full-opacity text, no border/fill/bold. `pl-4` (vs. `pr-3`)
+      // is reserved on every tab, active or not, so the dot never shifts the
+      // icon/label position when a tab activates. Font-weight is deliberately
+      // left untouched — labels render in the proportional Inter font, so a
+      // bold/regular swap would jostle tab widths on every activation.
+      className={`group relative flex h-7 cursor-pointer items-center gap-2 rounded-md border border-transparent pl-4 pr-3 text-xs transition-colors ${
+        active ? "text-fg" : "text-fg-muted hover:bg-bg-elevated/60"
       } ${isDragging ? "opacity-40" : ""}`}
     >
+      {active && (
+        <span
+          aria-hidden="true"
+          className="absolute left-1.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-accent"
+        />
+      )}
       <Icon size={13} className="shrink-0" />
       {editing ? (
         <input
