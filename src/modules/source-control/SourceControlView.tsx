@@ -1,23 +1,35 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Clipboard,
+  ClipboardList,
+  File,
   Folder,
+  FolderOpen,
   FolderTree,
   GitBranch,
+  GitCompare,
   List,
   Loader2,
   Minus,
   Plus,
   RefreshCw,
   Sparkles,
+  SquarePlus,
+  Undo2,
   UploadCloud,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { InfoDialog } from "@/components/InfoDialog";
+import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
+import { fsReveal } from "@/modules/explorer/lib/fsBridge";
 import {
   gitCommit,
   gitDiff,
   gitLog,
   gitPush,
   gitResolveRepo,
+  gitRestoreFile,
   gitStage,
   gitStatus,
   gitUnstage,
@@ -30,6 +42,7 @@ import { groupByFolder } from "./lib/groupByFolder";
 import { generateCommitMessage } from "./lib/aiCommit";
 import { withMinDuration } from "@/lib/withMinDuration";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useTabsStore } from "@/stores/tabsStore";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 
 type ViewMode = "flat" | "folder";
@@ -49,18 +62,102 @@ const STATUS_COLOR: Record<string, string> = {
 function StatusRow({
   file,
   displayPath,
+  repoPath,
   actionIcon: ActionIcon,
   actionLabel,
   onAction,
+  onOpen,
+  onRequestDiscard,
 }: {
   file: FileStatus;
   displayPath?: string;
+  repoPath: string;
   actionIcon: typeof Plus;
   actionLabel: string;
   onAction: (path: string) => void;
+  /** Left-click on the row: open this file's diff tab. */
+  onOpen: (path: string) => void;
+  /** Present on tracked unstaged rows only: ask to discard this file. */
+  onRequestDiscard?: (path: string) => void;
 }) {
+  const { t } = useTranslation("sourceControl");
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const discardable = onRequestDiscard && file.status !== "?";
+  const absPath = `${repoPath}/${file.path}`;
+
+  const menuItems: ContextMenuItem[] = [
+    {
+      id: "openFile",
+      label: t("menuOpenFile"),
+      icon: File,
+      group: 0,
+      onSelect: () => useTabsStore.getState().openFromSidebar({ kind: "editor", path: absPath }),
+    },
+    {
+      id: "openInNewTab",
+      label: t("menuOpenInNewTab"),
+      icon: SquarePlus,
+      group: 0,
+      onSelect: () => useTabsStore.getState().openInNewTab({ kind: "editor", path: absPath }),
+    },
+    {
+      id: "showDiff",
+      label: t("menuShowDiff"),
+      icon: GitCompare,
+      group: 0,
+      onSelect: () => onOpen(file.path),
+    },
+    {
+      id: "stageAction",
+      label: actionLabel,
+      icon: ActionIcon,
+      group: 1,
+      onSelect: () => onAction(file.path),
+    },
+    {
+      id: "copyPath",
+      label: t("menuCopyPath"),
+      icon: Clipboard,
+      group: 2,
+      onSelect: () => void navigator.clipboard.writeText(absPath),
+    },
+    {
+      id: "copyRelativePath",
+      label: t("menuCopyRelativePath"),
+      icon: ClipboardList,
+      group: 2,
+      onSelect: () => void navigator.clipboard.writeText(file.path),
+    },
+    {
+      id: "reveal",
+      label: t("menuRevealFinder"),
+      icon: FolderOpen,
+      group: 2,
+      onSelect: () => void fsReveal(absPath),
+    },
+    ...(discardable
+      ? [
+          {
+            id: "discard",
+            label: t("discard"),
+            icon: Undo2,
+            group: 3,
+            danger: true,
+            onSelect: () => onRequestDiscard(file.path),
+          } satisfies ContextMenuItem,
+        ]
+      : []),
+  ];
+
   return (
-    <li className="group flex items-center gap-2 px-3 py-1 text-sm hover:bg-bg-elevated/60">
+    <li
+      onClick={() => onOpen(file.path)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
+      className="group flex cursor-pointer items-center gap-2 px-3 py-1 text-sm hover:bg-bg-elevated/60"
+    >
       <span
         className={`w-3 shrink-0 text-center font-mono text-xs ${
           STATUS_COLOR[file.status] ?? "text-fg-muted"
@@ -73,16 +170,77 @@ function StatusRow({
           {displayPath ?? file.path}
         </span>
       </Tooltip>
+      {discardable && (
+        <Tooltip label={t("discard")}>
+          <button
+            type="button"
+            aria-label={t("discard")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestDiscard(file.path);
+            }}
+            className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-danger"
+          >
+            <Undo2 size={14} />
+          </button>
+        </Tooltip>
+      )}
       <Tooltip label={actionLabel}>
         <button
           type="button"
           aria-label={actionLabel}
-          onClick={() => onAction(file.path)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction(file.path);
+          }}
           className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
         >
           <ActionIcon size={14} />
         </button>
       </Tooltip>
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+    </li>
+  );
+}
+
+function HistoryRow({ commit }: { commit: CommitInfo }) {
+  const { t } = useTranslation("sourceControl");
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <li
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
+      className="py-1 text-xs"
+    >
+      <span className="font-mono text-fg-subtle">{commit.id}</span>
+      <span className="ml-2 text-fg-muted">{commit.summary}</span>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            {
+              id: "copyHash",
+              label: t("menuCopyHash"),
+              icon: Clipboard,
+              group: 0,
+              onSelect: () => void navigator.clipboard.writeText(commit.id),
+            },
+            {
+              id: "copyMessage",
+              label: t("menuCopyMessage"),
+              icon: ClipboardList,
+              group: 0,
+              onSelect: () => void navigator.clipboard.writeText(commit.summary),
+            },
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </li>
   );
 }
@@ -109,8 +267,11 @@ function FileList({
   actionIcon,
   actionLabel,
   folderActionLabel,
+  repoPath,
   onFileAction,
   onFolderAction,
+  onFileOpen,
+  onRequestDiscard,
 }: {
   files: FileStatus[];
   viewMode: ViewMode;
@@ -118,8 +279,11 @@ function FileList({
   actionIcon: typeof Plus;
   actionLabel: string;
   folderActionLabel: string;
+  repoPath: string;
   onFileAction: (path: string) => void;
   onFolderAction: (paths: string[]) => void;
+  onFileOpen: (path: string) => void;
+  onRequestDiscard?: (path: string) => void;
 }) {
   if (viewMode === "flat") {
     return (
@@ -128,9 +292,12 @@ function FileList({
           <StatusRow
             key={file.path}
             file={file}
+            repoPath={repoPath}
             actionIcon={actionIcon}
             actionLabel={actionLabel}
             onAction={onFileAction}
+            onOpen={onFileOpen}
+            onRequestDiscard={onRequestDiscard}
           />
         ))}
       </ul>
@@ -166,9 +333,12 @@ function FileList({
                   key={file.path}
                   file={file}
                   displayPath={basename(file.path)}
+                  repoPath={repoPath}
                   actionIcon={actionIcon}
                   actionLabel={actionLabel}
                   onAction={onFileAction}
+                  onOpen={onFileOpen}
+                  onRequestDiscard={onRequestDiscard}
                 />
               ))}
             </ul>
@@ -181,6 +351,7 @@ function FileList({
 
 export function SourceControlView() {
   const { t } = useTranslation("sourceControl");
+  const { t: tCommon } = useTranslation("common");
   const rootPath = useWorkspaceStore((s) => s.rootPath);
   const [repoPath, setRepoPath] = useState<string | null>(null);
   const [resolved, setResolved] = useState(false);
@@ -193,6 +364,22 @@ export function SourceControlView() {
   const [refreshing, setRefreshing] = useState(false);
   const providerId = useChatStore((s) => s.providerId);
   const model = useChatStore((s) => s.model);
+  const openDiffTab = useTabsStore((s) => s.openDiffTab);
+  // Repo-relative path of the file awaiting discard confirmation, if any.
+  const [discardTarget, setDiscardTarget] = useState<string | null>(null);
+  // Basename of a file whose discard failed, shown in an error dialog.
+  const [discardError, setDiscardError] = useState<string | null>(null);
+
+  // Rows report repo-relative paths; the diff tab (like the editor) wants an
+  // absolute path so it can resolve the repo on its own.
+  const openDiff = useCallback(
+    (path: string, staged: boolean) => {
+      if (repoPath) {
+        openDiffTab(`${repoPath}/${path}`, staged);
+      }
+    },
+    [repoPath, openDiffTab],
+  );
 
   const refresh = useCallback(async () => {
     if (!repoPath) {
@@ -283,7 +470,18 @@ export function SourceControlView() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-bg-inset">
+    // Suppress the WebView's own context menu anywhere in the panel; rows
+    // layer the app ContextMenu on top via their own handlers. Text inputs
+    // keep the native menu — it's how right-click paste works.
+    <div
+      className="flex h-full flex-col bg-bg-inset"
+      onContextMenu={(e) => {
+        const el = e.target as HTMLElement;
+        if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) {
+          e.preventDefault();
+        }
+      }}
+    >
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
           {t("title")}
@@ -396,6 +594,8 @@ export function SourceControlView() {
                   }
                 })
               }
+              onFileOpen={(path) => openDiff(path, true)}
+              repoPath={repoPath ?? ""}
             />
           </section>
         )}
@@ -439,6 +639,9 @@ export function SourceControlView() {
                   }
                 })
               }
+              onFileOpen={(path) => openDiff(path, false)}
+              onRequestDiscard={setDiscardTarget}
+              repoPath={repoPath ?? ""}
             />
           )}
         </section>
@@ -450,15 +653,41 @@ export function SourceControlView() {
             </h3>
             <ul className="px-3">
               {history.map((commit) => (
-                <li key={commit.id} className="py-1 text-xs">
-                  <span className="font-mono text-fg-subtle">{commit.id}</span>
-                  <span className="ml-2 text-fg-muted">{commit.summary}</span>
-                </li>
+                <HistoryRow key={commit.id} commit={commit} />
               ))}
             </ul>
           </section>
         )}
       </div>
+
+      {discardTarget && (
+        <ConfirmDialog
+          title={t("discardTitle")}
+          message={t("discardMessage", { name: basename(discardTarget) })}
+          confirmLabel={t("discardConfirm")}
+          cancelLabel={tCommon("actions.cancel")}
+          onConfirm={() => {
+            const target = discardTarget;
+            setDiscardTarget(null);
+            // A destructive action must never fail silently: surface the
+            // error and refresh so the list reflects whatever really happened.
+            withRepo((repo) => gitRestoreFile(repo, target)).catch(() => {
+              setDiscardError(basename(target));
+              void refresh();
+            });
+          }}
+          onCancel={() => setDiscardTarget(null)}
+        />
+      )}
+
+      {discardError && (
+        <InfoDialog
+          title={t("discardTitle")}
+          message={t("discardFailed", { name: discardError })}
+          confirmLabel={tCommon("actions.confirm")}
+          onConfirm={() => setDiscardError(null)}
+        />
+      )}
     </div>
   );
 }

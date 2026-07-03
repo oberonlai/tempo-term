@@ -307,6 +307,25 @@ describe("tabsStore", () => {
     expect(leafIds(activeTab().paneTree)).toHaveLength(1);
   });
 
+  it("creates a diff tab titled by basename and focuses the same file on re-open", () => {
+    const first = useTabsStore.getState().openDiffTab("/repo/src/App.tsx", false);
+    expect(activeTab().title).toBe("App.tsx");
+    expect(firstLeafContent(activeTab())).toEqual({
+      kind: "diff",
+      path: "/repo/src/App.tsx",
+      staged: false,
+    });
+    const again = useTabsStore.getState().openDiffTab("/repo/src/App.tsx", false);
+    expect(again).toBe(first);
+    expect(useTabsStore.getState().tabs).toHaveLength(1);
+  });
+
+  it("treats staged and unstaged diffs of the same file as distinct tabs", () => {
+    useTabsStore.getState().openDiffTab("/repo/a.ts", false);
+    useTabsStore.getState().openDiffTab("/repo/a.ts", true);
+    expect(useTabsStore.getState().tabs).toHaveLength(2);
+  });
+
   it("dedupes note tabs by id and git-graph as a singleton", () => {
     const first = useTabsStore.getState().openNoteTab("note-1", "X");
     const again = useTabsStore.getState().openNoteTab("note-1", "X");

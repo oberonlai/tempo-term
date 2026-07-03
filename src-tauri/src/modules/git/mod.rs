@@ -451,6 +451,49 @@ pub fn diff(repo_path: &str, staged: bool) -> Result<String, String> {
     }
 }
 
+/// Content of `path` at `rev`, where rev is limited to "HEAD" (last commit)
+/// or ":" (the index) — the only two versions the diff tab compares against.
+/// A file missing at that rev is an empty document, not an error, so new
+/// files diff as all-added.
+pub fn file_at_rev(repo_path: &str, rev: &str, path: &str) -> Result<String, String> {
+    if rev != "HEAD" && rev != ":" {
+        return Err(format!("unsupported rev: {rev}"));
+    }
+    ensure_not_flag(path)?;
+    // "HEAD:path" names the committed version; ":path" (single colon) names
+    // the index version — the colon separator is already part of that rev.
+    let spec = if rev == ":" {
+        format!(":{path}")
+    } else {
+        format!("{rev}:{path}")
+    };
+    match run_git(repo_path, &["show", &spec]) {
+        Ok(content) => Ok(content),
+        // `git show` wording varies by rev kind and version; match the known
+        // "no such file at that rev" messages so a genuine failure (corrupt
+        // object, bad repo) still surfaces instead of reading as empty.
+        // "invalid object name 'HEAD'" is the unborn-HEAD case (fresh repo,
+        // nothing committed yet): every file is new, so HEAD-side is empty.
+        Err(err)
+            if err.contains("does not exist")
+                || err.contains("exists on disk, but not in")
+                || err.contains("is in the index, but not at stage")
+                || err.contains("invalid object name 'HEAD'") =>
+        {
+            Ok(String::new())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Discard unstaged changes to one tracked file (`git restore`). The pathspec
+/// is wrapped in `:(literal)` so git magic like `:/` or `:(glob)` in a crafted
+/// path cannot widen the restore beyond the named file.
+pub fn restore_file(repo_path: &str, path: &str) -> Result<(), String> {
+    ensure_not_flag(path)?;
+    run_git(repo_path, &["restore", "--", &format!(":(literal){path}")]).map(|_| ())
+}
+
 /// Push the current branch to its remote.
 pub fn push(repo_path: &str) -> Result<String, String> {
     run_git(repo_path, &["push"])
@@ -897,6 +940,16 @@ pub fn git_log(repo_path: String, limit: Option<usize>) -> Result<Vec<CommitInfo
 #[tauri::command]
 pub fn git_diff(repo_path: String, staged: bool) -> Result<String, String> {
     diff(&repo_path, staged)
+}
+
+#[tauri::command]
+pub fn git_file_at_rev(repo_path: String, rev: String, path: String) -> Result<String, String> {
+    file_at_rev(&repo_path, &rev, &path)
+}
+
+#[tauri::command]
+pub fn git_restore_file(repo_path: String, path: String) -> Result<(), String> {
+    restore_file(&repo_path, &path)
 }
 
 #[tauri::command]
@@ -1376,6 +1429,81 @@ mod tests {
         let staged_diff = diff(&path, true).unwrap();
         assert!(staged_diff.contains("a.txt"));
         assert!(staged_diff.contains("+hello world"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_at_rev_reads_head_and_index_versions() {
+        let dir = temp_repo_dir("file_at_rev");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init"]).unwrap();
+        run_git(&path, &["config", "user.name", "Test"]).unwrap();
+        run_git(&path, &["config", "user.email", "test@example.com"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "committed\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+        run_git(&path, &["commit", "-m", "c1"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "staged\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+
+        assert_eq!(file_at_rev(&path, "HEAD", "a.txt").unwrap(), "committed\n");
+        assert_eq!(file_at_rev(&path, ":", "a.txt").unwrap(), "staged\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_at_rev_missing_file_is_empty_and_bad_args_rejected() {
+        let dir = temp_repo_dir("file_at_rev_missing");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init"]).unwrap();
+        run_git(&path, &["config", "user.name", "Test"]).unwrap();
+        run_git(&path, &["config", "user.email", "test@example.com"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "x\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+        run_git(&path, &["commit", "-m", "c1"]).unwrap();
+
+        assert_eq!(file_at_rev(&path, "HEAD", "nope.txt").unwrap(), "");
+        assert_eq!(file_at_rev(&path, ":", "nope.txt").unwrap(), "");
+        assert!(file_at_rev(&path, "HEAD~1", "a.txt").is_err());
+        assert!(file_at_rev(&path, "HEAD", "--evil").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_at_rev_unborn_head_reads_as_empty() {
+        let dir = temp_repo_dir("file_at_rev_unborn");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "staged\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+
+        // No commits yet: HEAD is unborn, so the HEAD side is an empty doc
+        // (all-added diff), not an error.
+        assert_eq!(file_at_rev(&path, "HEAD", "a.txt").unwrap(), "");
+        assert_eq!(file_at_rev(&path, ":", "a.txt").unwrap(), "staged\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_file_reverts_unstaged_change() {
+        let dir = temp_repo_dir("restore_file");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init"]).unwrap();
+        run_git(&path, &["config", "user.name", "Test"]).unwrap();
+        run_git(&path, &["config", "user.email", "test@example.com"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "original\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+        run_git(&path, &["commit", "-m", "c1"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "dirty\n").unwrap();
+
+        restore_file(&path, "a.txt").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+            "original\n"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

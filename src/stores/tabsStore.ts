@@ -40,7 +40,7 @@ export type OpenFromSidebarResult =
   | { status: "already-connected" }
   | { status: "at-capacity" };
 
-export type TabKind = "terminal" | "editor" | "note" | "preview" | "git-graph" | "launcher";
+export type TabKind = "terminal" | "editor" | "note" | "preview" | "git-graph" | "diff" | "launcher";
 
 /**
  * A single tab. `kind` is only the tab's creation type, used for the tab-bar
@@ -83,6 +83,7 @@ interface TabsState {
   openNoteTab: (noteId: string, title: string) => string;
   openPreviewTab: (url: string) => string;
   openGitGraphTab: () => string;
+  openDiffTab: (path: string, staged: boolean) => string;
   /**
    * Open sidebar content (explorer file, note, or SSH connection). When the
    * active tab is a real working tab, this splits beside its current
@@ -277,6 +278,9 @@ function singleLeafContentEquals(tab: Tab, content: PaneContent): boolean {
   }
   if (pane.kind === "preview" && content.kind === "preview") {
     return pane.url === content.url;
+  }
+  if (pane.kind === "diff" && content.kind === "diff") {
+    return pane.path === content.path && pane.staged === content.staged;
   }
   return true;
 }
@@ -588,6 +592,33 @@ export const useTabsStore = create<TabsState>()(
       kind: "git-graph",
       title: "Git Graph",
       paneTree: leaf(paneId, { kind: "git-graph" }),
+      activeLeafId: paneId,
+      paneOrder: [paneId],
+    };
+    set((state) => ({ tabs: [...state.tabs, tab], activeId: id }));
+    return id;
+  },
+
+  openDiffTab: (path, staged) => {
+    const spaceId = get().ensureSpace();
+    const existing = get().tabs.find(
+      (t) =>
+        t.kind === "diff" &&
+        t.spaceId === spaceId &&
+        singleLeafContentEquals(t, { kind: "diff", path, staged }),
+    );
+    if (existing) {
+      set({ activeId: existing.id });
+      return existing.id;
+    }
+    const id = nextTabId();
+    const paneId = nextPaneId();
+    const tab: Tab = {
+      id,
+      spaceId,
+      kind: "diff",
+      title: path.split(/[\\/]/).pop() ?? path,
+      paneTree: leaf(paneId, { kind: "diff", path, staged }),
       activeLeafId: paneId,
       paneOrder: [paneId],
     };

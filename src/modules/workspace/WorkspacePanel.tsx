@@ -7,6 +7,7 @@ import {
   FileText,
   Folder,
   GitBranch,
+  GitCompare,
   GitPullRequest,
   Globe,
   LayoutGrid,
@@ -52,6 +53,8 @@ function tabIcon(kind: TabKind): LucideIcon {
       return Globe;
     case "git-graph":
       return GitBranch;
+    case "diff":
+      return GitCompare;
     case "launcher":
       return LayoutGrid;
   }

@@ -12,6 +12,8 @@ vi.mock("./lib/gitBridge", () => ({
   gitUnstage: vi.fn().mockResolvedValue(undefined),
   gitCommit: vi.fn().mockResolvedValue(undefined),
   gitPush: vi.fn().mockResolvedValue(undefined),
+  gitFileAtRev: vi.fn().mockResolvedValue(""),
+  gitRestoreFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./lib/aiCommit", () => ({
@@ -21,6 +23,99 @@ vi.mock("./lib/aiCommit", () => ({
 import { SourceControlView } from "./SourceControlView";
 import * as gitBridge from "./lib/gitBridge";
 import type { GitStatus } from "./lib/gitBridge";
+import { useTabsStore } from "@/stores/tabsStore";
+
+const STATUS_ONE_MODIFIED: GitStatus = {
+  branch: "main",
+  staged: [],
+  unstaged: [{ path: "src/a.ts", staged: false, status: "M" }],
+};
+
+describe("SourceControlView row interactions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(gitBridge.gitResolveRepo).mockResolvedValue("/repo");
+    vi.mocked(gitBridge.gitLog).mockResolvedValue([]);
+    vi.mocked(gitBridge.gitStatus).mockResolvedValue(STATUS_ONE_MODIFIED);
+    useWorkspaceStore.getState().setRoot("/repo");
+    useTabsStore.setState({ tabs: [], activeId: null, spaces: [], activeSpaceId: null });
+  });
+
+  it("opens a diff tab when a changed file row is clicked", async () => {
+    render(<SourceControlView />);
+    fireEvent.click(await screen.findByText("src/a.ts"));
+
+    const tabs = useTabsStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].kind).toBe("diff");
+    expect(tabs[0].title).toBe("a.ts");
+  });
+
+  it("confirms before discarding and calls gitRestoreFile", async () => {
+    render(<SourceControlView />);
+    await screen.findByText("src/a.ts");
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard Changes" }));
+    expect(gitBridge.gitRestoreFile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() =>
+      expect(gitBridge.gitRestoreFile).toHaveBeenCalledWith("/repo", "src/a.ts"),
+    );
+  });
+
+  it("right-click opens a custom menu with open, stage, copy and discard items", async () => {
+    render(<SourceControlView />);
+    fireEvent.contextMenu(await screen.findByText("src/a.ts"));
+
+    expect(screen.getByRole("menuitem", { name: "Open File" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Show Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Stage" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy Path" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Discard Changes" })).toBeInTheDocument();
+  });
+
+  it("does not open a diff tab when a context-menu item is clicked", async () => {
+    // jsdom has no clipboard; the menu action calls writeText.
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<SourceControlView />);
+    fireEvent.contextMenu(await screen.findByText("src/a.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
+
+    expect(useTabsStore.getState().tabs).toHaveLength(0);
+  });
+
+  it("stages the file from the context menu", async () => {
+    render(<SourceControlView />);
+    fireEvent.contextMenu(await screen.findByText("src/a.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stage" }));
+
+    await waitFor(() => expect(gitBridge.gitStage).toHaveBeenCalledWith("/repo", "src/a.ts"));
+  });
+
+  it("history row right-click offers copy hash", async () => {
+    vi.mocked(gitBridge.gitLog).mockResolvedValue([
+      { id: "abc1234", summary: "feat: x", author: "a", timestamp: 1 },
+    ]);
+    render(<SourceControlView />);
+    fireEvent.contextMenu(await screen.findByText("feat: x"));
+
+    expect(screen.getByRole("menuitem", { name: "Copy Hash" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy Message" })).toBeInTheDocument();
+  });
+
+  it("offers no discard button for untracked or staged rows", async () => {
+    vi.mocked(gitBridge.gitStatus).mockResolvedValue({
+      branch: "main",
+      staged: [{ path: "staged.ts", staged: true, status: "M" }],
+      unstaged: [{ path: "new.ts", staged: false, status: "?" }],
+    });
+    render(<SourceControlView />);
+    await screen.findByText("new.ts");
+
+    expect(screen.queryByRole("button", { name: "Discard Changes" })).not.toBeInTheDocument();
+  });
+});
 
 describe("SourceControlView folder view", () => {
   beforeEach(() => {

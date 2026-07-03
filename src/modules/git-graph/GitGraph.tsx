@@ -106,7 +106,7 @@ export function GitGraph({
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border p-8 py-16 text-center">
         <GitBranch className="mb-3 h-10 w-10 animate-pulse text-fg-subtle" />
         <p className="font-medium text-fg">{labels.emptyTitle}</p>
-        <p className="mt-1 max-w-sm text-xs text-fg-subtle">{labels.emptyHint}</p>
+        <p className="mt-1 max-w-sm text-[13px] text-fg-subtle">{labels.emptyHint}</p>
       </div>
     );
   }
@@ -209,11 +209,14 @@ export function GitGraph({
               // The HEAD commit is marked at its graph node (filled accent + glow);
               // its row stays calm and only brightens to full foreground, so the
               // list reads uniformly. Selection keeps its own filled style.
+              // The row (hit area, border and background) spans the full
+              // width including the lane gutter; backgrounds stay translucent
+              // so the SVG branch lines remain visible underneath.
               const rowState = isSelected
-                ? "border-border-strong bg-bg-elevated text-fg shadow-sm"
+                ? "border-border-strong bg-bg-elevated/60 text-fg shadow-sm"
                 : isCurrent
-                  ? "border-transparent text-fg hover:bg-bg-elevated/50"
-                  : "border-transparent text-fg-muted hover:bg-bg-elevated/50 hover:text-fg";
+                  ? "border-transparent text-fg hover:bg-bg-elevated/40"
+                  : "border-transparent text-fg-muted hover:bg-bg-elevated/40 hover:text-fg";
               return (
                 <div
                   key={commit.hash}
@@ -226,7 +229,7 @@ export function GitGraph({
                     height: `${ROW_HEIGHT}px`,
                     top: `${layout.y - ROW_HEIGHT / 2}px`,
                   }}
-                  className={`absolute left-[100px] right-4 flex cursor-pointer items-center justify-between rounded border px-3 py-1 transition-all ${rowState}`}
+                  className={`absolute left-0 right-4 flex cursor-pointer items-center justify-between rounded border py-1 pl-[112px] pr-3 transition-all ${rowState}`}
                 >
                   <div className="flex items-center space-x-3 overflow-hidden pr-2">
                     <span className="select-all font-mono text-xs font-semibold text-accent">
@@ -271,12 +274,12 @@ export function GitGraph({
                       );
                     })}
 
-                    <span className="truncate font-sans text-xs font-medium text-fg">
+                    <span className="truncate font-sans text-[13px] font-medium text-fg">
                       {commit.message}
                     </span>
                   </div>
 
-                  <div className="flex shrink-0 items-center space-x-4 font-mono text-[12px] text-fg-subtle">
+                  <div className="flex shrink-0 items-center space-x-4 font-mono text-[13px] text-fg-subtle">
                     <div className="flex items-center space-x-1">
                       <User className="h-3 w-3" />
                       <span className="max-w-[70px] truncate">{commit.author}</span>

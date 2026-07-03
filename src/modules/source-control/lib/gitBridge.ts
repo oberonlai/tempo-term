@@ -50,3 +50,13 @@ export function gitDiff(repoPath: string, staged: boolean): Promise<string> {
 export function gitPush(repoPath: string): Promise<string> {
   return invoke<string>("git_push", { repoPath });
 }
+
+/** rev is "HEAD" (last commit) or ":" (the index). Missing at rev = "". */
+export function gitFileAtRev(repoPath: string, rev: "HEAD" | ":", path: string): Promise<string> {
+  return invoke<string>("git_file_at_rev", { repoPath, rev, path });
+}
+
+/** Discard unstaged changes to one tracked file (git restore). */
+export function gitRestoreFile(repoPath: string, path: string): Promise<void> {
+  return invoke<void>("git_restore_file", { repoPath, path });
+}

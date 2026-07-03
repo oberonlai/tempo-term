@@ -33,7 +33,7 @@ export function DiffView({ lines, emptyLabel }: DiffViewProps) {
 
   if (lines.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-fg-subtle">
+      <div className="flex h-full items-center justify-center text-[13px] text-fg-subtle">
         {emptyLabel}
       </div>
     );
@@ -45,7 +45,7 @@ export function DiffView({ lines, emptyLabel }: DiffViewProps) {
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="h-full overflow-auto font-mono text-[12px]"
+      className="h-full overflow-auto font-mono text-[13px]"
     >
       <div style={{ height: `${totalHeight}px` }} className="relative">
         <div style={{ transform: `translateY(${offsetTop}px)` }}>

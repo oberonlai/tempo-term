@@ -22,9 +22,9 @@ use modules::clipboard::{
 use modules::git::{
     git_branch_checkout, git_branch_checkout_track, git_branch_create_at, git_branch_delete,
     git_branches, git_cherry_pick, git_commit, git_commit_details, git_commit_file_diff, git_diff,
-    git_fetch, git_graph_log, git_log, git_merge, git_pull, git_push, git_push_delete, git_rebase,
-    git_reset, git_resolve_repo, git_revert, git_stage, git_status, git_tag_create, git_tag_delete,
-    git_unstage, git_worktree_info,
+    git_fetch, git_file_at_rev, git_graph_log, git_log, git_merge, git_pull, git_push,
+    git_push_delete, git_rebase, git_reset, git_resolve_repo, git_restore_file, git_revert,
+    git_stage, git_status, git_tag_create, git_tag_delete, git_unstage, git_worktree_info,
 };
 use modules::pr::{gh_available, pr_via_api, pr_via_gh};
 use modules::preview::{
@@ -172,6 +172,8 @@ pub fn run() {
             git_commit,
             git_log,
             git_diff,
+            git_file_at_rev,
+            git_restore_file,
             git_push,
             git_fetch,
             git_graph_log,

@@ -83,7 +83,7 @@ export function DiffExplain({
 
   if (diffText.trim() === "") {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-fg-subtle">
+      <div className="flex h-full items-center justify-center text-[13px] text-fg-subtle">
         {labels.empty}
       </div>
     );
@@ -93,7 +93,7 @@ export function DiffExplain({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-fg-subtle">
         <Loader2 className="h-6 w-6 animate-spin text-accent" />
-        <p className="text-xs">{labels.explaining}</p>
+        <p className="text-[13px]">{labels.explaining}</p>
       </div>
     );
   }
@@ -101,13 +101,13 @@ export function DiffExplain({
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
-        <p className="text-xs text-danger" role="alert">
+        <p className="text-[13px] text-danger" role="alert">
           {error}
         </p>
         <button
           type="button"
           onClick={() => void run()}
-          className="rounded border border-border-strong px-2 py-1 text-xs text-fg-muted hover:bg-bg-elevated hover:text-fg"
+          className="rounded border border-border-strong px-2 py-1 text-[13px] text-fg-muted hover:bg-bg-elevated hover:text-fg"
         >
           {labels.regenerate}
         </button>
@@ -121,7 +121,7 @@ export function DiffExplain({
         <button
           type="button"
           onClick={() => void run()}
-          className="flex items-center gap-1.5 rounded border border-border-strong bg-bg-elevated px-3 py-1.5 text-xs text-fg hover:bg-bg-inset"
+          className="flex items-center gap-1.5 rounded border border-border-strong bg-bg-elevated px-3 py-1.5 text-[13px] text-fg hover:bg-bg-inset"
         >
           <Sparkles className="h-3.5 w-3.5 text-accent" />
           {labels.generate}
@@ -136,13 +136,13 @@ export function DiffExplain({
         <button
           type="button"
           onClick={regenerate}
-          className="flex items-center gap-1 rounded p-1 text-[11px] text-fg-subtle hover:bg-bg-elevated hover:text-fg"
+          className="flex items-center gap-1 rounded p-1 text-[13px] text-fg-subtle hover:bg-bg-elevated hover:text-fg"
         >
           <RefreshCw className="h-3 w-3" />
           {labels.regenerate}
         </button>
       </div>
-      <div className="px-3 pb-3 text-xs">
+      <div className="px-3 pb-3 text-[13px]">
         <ChatMarkdown content={explanation} />
       </div>
     </div>

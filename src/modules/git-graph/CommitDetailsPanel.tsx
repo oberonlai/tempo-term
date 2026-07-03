@@ -182,7 +182,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
           style={{ width: `${leftWidth}px` }}
           className="relative shrink-0 overflow-auto px-3 py-2"
         >
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[11px] text-fg-subtle">
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[13px] text-fg-subtle">
             <span>
               {labels.author}: {commit.author}
             </span>
@@ -191,15 +191,15 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
             </span>
           </div>
           {details && (
-            <pre className="mt-2 whitespace-pre-wrap font-sans text-xs text-fg">
+            <pre className="mt-2 whitespace-pre-wrap font-sans text-[13px] text-fg">
               {details.message}
             </pre>
           )}
-          <div className="mt-2 text-[11px] font-medium text-fg-subtle">
+          <div className="mt-2 text-[13px] font-medium text-fg-subtle">
             {labels.changedFiles} ({details?.files.length ?? 0})
           </div>
           {details && files.length === 0 ? (
-            <div className="mt-1 text-[11px] text-fg-subtle">{labels.noChanges}</div>
+            <div className="mt-1 text-[13px] text-fg-subtle">{labels.noChanges}</div>
           ) : (
             <div
               ref={fileListRef}
@@ -213,7 +213,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
                     type="button"
                     onClick={() => setSelectedFile(f.path)}
                     style={{ height: `${FILE_ROW_HEIGHT}px` }}
-                    className={`flex w-full items-center gap-2 rounded px-2 text-left font-mono text-[11px] ${
+                    className={`flex w-full items-center gap-2 rounded px-2 text-left font-mono text-[13px] ${
                       selectedFile === f.path
                         ? "bg-bg-elevated text-fg"
                         : "text-fg-muted hover:bg-bg-elevated/50"
@@ -248,7 +248,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
                 <button
                   type="button"
                   onClick={() => setTab("diff")}
-                  className={`rounded px-2 py-0.5 text-[11px] ${
+                  className={`rounded px-2 py-0.5 text-[13px] ${
                     tab === "diff"
                       ? "bg-bg-elevated text-fg"
                       : "text-fg-subtle hover:text-fg"
@@ -259,7 +259,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
                 <button
                   type="button"
                   onClick={() => setTab("ai")}
-                  className={`rounded px-2 py-0.5 text-[11px] ${
+                  className={`rounded px-2 py-0.5 text-[13px] ${
                     tab === "ai"
                       ? "bg-bg-elevated text-fg"
                       : "text-fg-subtle hover:text-fg"
@@ -292,7 +292,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
               </div>
             </>
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-fg-subtle">
+            <div className="flex h-full items-center justify-center text-[13px] text-fg-subtle">
               {labels.noFileSelected}
             </div>
           )}
