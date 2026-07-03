@@ -80,22 +80,24 @@ export function FileFinder({ root, onClose }: FileFinderProps) {
   // home directory, which already contains "d","o","c","s" in order followed
   // by a "/") satisfy a query like "docs/" for every single file in the
   // workspace, regardless of where it actually lives relative to the root.
-  const relativeFiles = useMemo(
-    () => files.map((path) => ({ path, relative: relativePath(path, root) })),
-    [files, root],
-  );
+  const { relativePaths, relativeToPath } = useMemo(() => {
+    const paths: string[] = [];
+    const toPath = new Map<string, string>();
+    for (const path of files) {
+      const relative = relativePath(path, root);
+      paths.push(relative);
+      toPath.set(relative, path);
+    }
+    return { relativePaths: paths, relativeToPath: toPath };
+  }, [files, root]);
 
   const results = useMemo(() => {
     if (showRecent) {
       return recentResults;
     }
-    const rankedRelatives = fuzzyRank(
-      query,
-      relativeFiles.map((f) => f.relative),
-    ).slice(0, 50);
-    const byRelative = new Map(relativeFiles.map((f) => [f.relative, f.path]));
-    return rankedRelatives.map((relative) => byRelative.get(relative)!);
-  }, [query, relativeFiles, showRecent, recentResults]);
+    const rankedRelatives = fuzzyRank(query, relativePaths).slice(0, 50);
+    return rankedRelatives.map((relative) => relativeToPath.get(relative)!);
+  }, [query, relativePaths, relativeToPath, showRecent, recentResults]);
 
   // The result set changes on every keystroke; keep the highlighted row
   // pinned to the top match instead of an index that now points elsewhere.
