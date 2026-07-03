@@ -311,4 +311,31 @@ describe("GitGraphTabContent compare mode", () => {
     // no second fetch) is even scheduled — safe to assert synchronously.
     expect(gitCommitDetails).toHaveBeenCalledTimes(1);
   });
+
+  it("falls back to a single selection when the shift-click anchor is no longer in a freshly reloaded commit list", async () => {
+    vi.mocked(gitGraphLog)
+      .mockResolvedValueOnce(commitList(["aaa1111", "bbb2222"], false))
+      .mockResolvedValueOnce(commitList(["ccc3333", "bbb2222"], false));
+
+    render(<GitGraphTabContent />);
+    await waitFor(() => screen.getByText("msg aaa1111"));
+
+    const rowA = screen.getByText("msg aaa1111").closest("div[class*='absolute']")!;
+    fireEvent.click(rowA);
+
+    // Simulate the repo changing underneath the stale selection (e.g. a
+    // branch switch): the reload drops aaa1111 out of the list entirely.
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => screen.getByText("msg ccc3333"));
+    expect(screen.queryByText("msg aaa1111")).not.toBeInTheDocument();
+
+    const rowB = screen.getByText("msg bbb2222").closest("div[class*='absolute']")!;
+    fireEvent.click(rowB, { shiftKey: true });
+
+    // The stale anchor's index can't be found (-1), so this must collapse to
+    // a plain single selection on bbb2222 instead of an arbitrarily-ordered
+    // compare pair.
+    await waitFor(() => expect(screen.getAllByText("bbb2222").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/ \.\. /)).not.toBeInTheDocument();
+  });
 });

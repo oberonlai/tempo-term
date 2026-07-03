@@ -261,6 +261,16 @@ export function GitGraphTabContent() {
         }
         const anchorIndex = commits.findIndex((c) => c.hash === anchor.hash);
         const commitIndex = commits.findIndex((c) => c.hash === commit.hash);
+        if (anchorIndex === -1 || commitIndex === -1) {
+          // The anchor (or, in principle, the clicked commit) is no longer in
+          // the loaded list — e.g. the branch/repo changed underneath a
+          // stale selection. Ordering would be meaningless, so drop back to
+          // a plain single selection instead of guessing.
+          if (prev?.mode === "single" && prev.commit.hash === commit.hash) {
+            return prev;
+          }
+          return { mode: "single", commit };
+        }
         const [from, to] = anchorIndex > commitIndex ? [anchor, commit] : [commit, anchor];
         if (prev?.mode === "compare" && prev.from.hash === from.hash && prev.to.hash === to.hash) {
           return prev;
