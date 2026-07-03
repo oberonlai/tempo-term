@@ -119,8 +119,14 @@ function TabItem({ id }: { id: string }) {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
-      className={`group flex h-7 cursor-pointer items-center gap-2 rounded-md px-3 text-xs transition-colors ${
-        active ? "bg-bg-elevated text-fg" : "text-fg-muted hover:bg-bg-elevated/60"
+      // Same active-chip recipe as WorkspacePanel's tab cards and the
+      // settings theme/language pickers: an accent border + accent-tinted
+      // fill reads clearly in every theme, unlike the old bg-elevated-only
+      // state whose contrast against bg-inset varies a lot theme to theme.
+      className={`group flex h-7 cursor-pointer items-center gap-2 rounded-md border px-3 text-xs transition-colors ${
+        active
+          ? "border-accent bg-accent/10 text-fg"
+          : "border-transparent text-fg-muted hover:bg-bg-elevated/60"
       } ${isDragging ? "opacity-40" : ""}`}
     >
       <Icon size={13} className="shrink-0" />
