@@ -58,8 +58,16 @@ export function ExplorerView() {
   }, [loadEntries]);
 
   // A newly opened (or switched-to) root always renders fully collapsed.
+  // ExplorerView doesn't remount when the workspace root changes (rootPath
+  // just comes from the store), so collapseSignal/expandSignal must be reset
+  // here too: otherwise a leftover nonzero expandSignal from the previous
+  // root would hit the new root's freshly mounted TreeNodes on mount
+  // (effects always run on mount, regardless of the dependency array) and
+  // silently cascade-expand it.
   useEffect(() => {
     setTreeExpanded(false);
+    setCollapseSignal(0);
+    setExpandSignal(0);
   }, [rootPath]);
 
   function toggleExpandCollapseAll() {
