@@ -137,10 +137,20 @@ export function GitGraph({
 
   // Keep the active commit in view when keyboard navigation moves it off
   // the visible edge of the (virtualized, manually-scrolled) container.
+  // Gated on activeHash actually changing (not just `layouts`, which gets a
+  // new reference every time more history pages in) so browsing further
+  // down the list doesn't keep snapping back to the still-selected row.
+  const prevActiveHashRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeHash || !scrollRef.current) {
+      prevActiveHashRef.current = activeHash;
       return;
     }
+    if (activeHash === prevActiveHashRef.current) {
+      return;
+    }
+    prevActiveHashRef.current = activeHash;
+
     const layout = layouts[activeHash];
     if (!layout) {
       return;

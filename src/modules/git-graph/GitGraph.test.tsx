@@ -190,6 +190,35 @@ describe("GitGraph auto-scroll", () => {
 
     expect(scrollContainer.scrollTop).toBe(0);
   });
+
+  it("does not re-scroll when layouts change but the active commit stays the same (e.g. pagination)", () => {
+    const { rerender } = render(
+      <GitGraph
+        commits={commits}
+        selection={{ mode: "single", commit: commits[0] }}
+        onSelectCommit={vi.fn()}
+        labels={LABELS}
+      />,
+    );
+    const scrollContainer = document.querySelector("div.flex-1.overflow-auto") as HTMLElement;
+    Object.defineProperty(scrollContainer, "clientHeight", { value: 200, configurable: true });
+    // The user manually scrolled away from the active row to browse history.
+    scrollContainer.scrollTop = 500;
+
+    // More history pages in: `commits` gets a new array identity (and thus a
+    // new `layouts` object from useMemo), but the selection is unchanged.
+    const morePages = [...commits, commit("z", [], "msg z")];
+    rerender(
+      <GitGraph
+        commits={morePages}
+        selection={{ mode: "single", commit: commits[0] }}
+        onSelectCommit={vi.fn()}
+        labels={LABELS}
+      />,
+    );
+
+    expect(scrollContainer.scrollTop).toBe(500);
+  });
 });
 
 describe("GitGraph compare-mode highlighting", () => {
