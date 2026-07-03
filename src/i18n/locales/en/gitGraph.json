@@ -40,7 +40,11 @@
     "aiExplaining": "Analyzing…",
     "aiRegenerate": "Regenerate",
     "aiNeedKey": "No API key set. Add one in settings and try again.",
-    "aiEmpty": "Nothing to explain"
+    "aiEmpty": "Nothing to explain",
+    "viewFolder": "Group by folder",
+    "viewFlat": "Flat view",
+    "expandFolder": "Expand {{name}}",
+    "collapseFolder": "Collapse {{name}}"
   },
   "menu": {
     "createBranchHere": "Create branch here… (git branch)",

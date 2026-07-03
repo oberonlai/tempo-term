@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ChevronDown,
+  ChevronRight,
   Clipboard,
   ClipboardList,
   File,
@@ -38,7 +40,9 @@ import {
   type GitStatus,
 } from "./lib/gitBridge";
 import { Tooltip } from "@/components/Tooltip";
-import { groupByFolder } from "./lib/groupByFolder";
+import { buildFileTree, collectDescendantFiles, type TreeNode } from "@/lib/fileTree";
+import { useCollapsedPaths } from "@/lib/useCollapsedPaths";
+import { usePendingGraphSelectionStore } from "@/modules/git-graph/lib/pendingGraphSelectionStore";
 import { generateCommitMessage } from "./lib/aiCommit";
 import { withMinDuration } from "@/lib/withMinDuration";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -68,6 +72,7 @@ function StatusRow({
   onAction,
   onOpen,
   onRequestDiscard,
+  indent = 0,
 }: {
   file: FileStatus;
   displayPath?: string;
@@ -79,6 +84,8 @@ function StatusRow({
   onOpen: (path: string) => void;
   /** Present on tracked unstaged rows only: ask to discard this file. */
   onRequestDiscard?: (path: string) => void;
+  /** Tree depth for indentation; 0 (default) matches flat mode's spacing. */
+  indent?: number;
 }) {
   const { t } = useTranslation("sourceControl");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -156,7 +163,8 @@ function StatusRow({
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
-      className="group flex cursor-pointer items-center gap-2 px-3 py-1 text-sm hover:bg-bg-elevated/60"
+      style={{ paddingLeft: `${indent * 14 + 12}px` }}
+      className="group flex cursor-pointer items-center gap-2 py-1 pr-3 text-sm hover:bg-bg-elevated/60"
     >
       <span
         className={`w-3 shrink-0 text-center font-mono text-xs ${
@@ -208,13 +216,20 @@ function StatusRow({
 function HistoryRow({ commit }: { commit: CommitInfo }) {
   const { t } = useTranslation("sourceControl");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  function viewInGraph() {
+    usePendingGraphSelectionStore.getState().request(commit.id);
+    useTabsStore.getState().openGitGraphTab();
+  }
+
   return (
     <li
+      onClick={viewInGraph}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
-      className="py-1 text-xs"
+      className="cursor-pointer py-1 text-xs hover:bg-bg-elevated/60"
     >
       <span className="font-mono text-fg-subtle">{commit.id}</span>
       <span className="ml-2 text-fg-muted">{commit.summary}</span>
@@ -224,17 +239,24 @@ function HistoryRow({ commit }: { commit: CommitInfo }) {
           y={menu.y}
           items={[
             {
+              id: "viewInGraph",
+              label: t("menuViewInGraph"),
+              icon: GitCompare,
+              group: 0,
+              onSelect: viewInGraph,
+            },
+            {
               id: "copyHash",
               label: t("menuCopyHash"),
               icon: Clipboard,
-              group: 0,
+              group: 1,
               onSelect: () => void navigator.clipboard.writeText(commit.id),
             },
             {
               id: "copyMessage",
               label: t("menuCopyMessage"),
               icon: ClipboardList,
-              group: 0,
+              group: 1,
               onSelect: () => void navigator.clipboard.writeText(commit.summary),
             },
           ]}
@@ -255,15 +277,128 @@ function basename(path: string): string {
 }
 
 /**
+ * Recursively renders one level of a changed-files tree: folder headers with
+ * a collapse toggle and a subtree-wide action button, file rows via StatusRow.
+ */
+function FileTreeRows({
+  nodes,
+  depth,
+  collapsed,
+  onToggleCollapse,
+  repoPath,
+  actionIcon: ActionIcon,
+  actionLabel,
+  folderActionLabel,
+  onFileAction,
+  onFolderAction,
+  onFileOpen,
+  onRequestDiscard,
+}: {
+  nodes: TreeNode<FileStatus>[];
+  depth: number;
+  collapsed: Set<string>;
+  onToggleCollapse: (path: string) => void;
+  repoPath: string;
+  actionIcon: typeof Plus;
+  actionLabel: string;
+  folderActionLabel: string;
+  onFileAction: (path: string) => void;
+  onFolderAction: (paths: string[]) => void;
+  onFileOpen: (path: string) => void;
+  onRequestDiscard?: (path: string) => void;
+}) {
+  const { t } = useTranslation("sourceControl");
+  return (
+    <>
+      {nodes.map((node) => {
+        if (node.kind === "file") {
+          return (
+            <StatusRow
+              key={node.path}
+              file={node.file}
+              // basename (not node.name) re-appends the trailing "/" git
+              // status uses for an untracked directory, e.g. "dir/" — the
+              // tree's own `name` is the bare segment "dir", used for
+              // sorting/keys, not display.
+              displayPath={basename(node.file.path)}
+              repoPath={repoPath}
+              actionIcon={ActionIcon}
+              actionLabel={actionLabel}
+              onAction={onFileAction}
+              onOpen={onFileOpen}
+              onRequestDiscard={onRequestDiscard}
+              indent={depth}
+            />
+          );
+        }
+        const isCollapsed = collapsed.has(node.path);
+        return (
+          <li key={node.path}>
+            <div
+              style={{ paddingLeft: `${depth * 14 + 12}px` }}
+              className="group flex items-center gap-1 py-1 pr-3 text-sm hover:bg-bg-elevated/60"
+            >
+              <button
+                type="button"
+                onClick={() => onToggleCollapse(node.path)}
+                aria-label={
+                  isCollapsed
+                    ? t("expandFolder", { name: node.path })
+                    : t("collapseFolder", { name: node.path })
+                }
+                className="flex shrink-0 items-center text-fg-subtle hover:text-fg"
+              >
+                {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+              </button>
+              <Folder size={13} className="shrink-0 text-fg-subtle" />
+              <Tooltip label={node.path} className="min-w-0 flex-1">
+                <span className="min-w-0 flex-1 truncate text-fg-muted">{node.name}</span>
+              </Tooltip>
+              <Tooltip label={`${folderActionLabel}: ${node.path}`}>
+                <button
+                  type="button"
+                  aria-label={`${folderActionLabel}: ${node.path}`}
+                  onClick={() => onFolderAction(collectDescendantFiles(node).map((f) => f.path))}
+                  className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
+                >
+                  <ActionIcon size={14} />
+                </button>
+              </Tooltip>
+            </div>
+            {!isCollapsed && (
+              <ul>
+                <FileTreeRows
+                  nodes={node.children}
+                  depth={depth + 1}
+                  collapsed={collapsed}
+                  onToggleCollapse={onToggleCollapse}
+                  repoPath={repoPath}
+                  actionIcon={ActionIcon}
+                  actionLabel={actionLabel}
+                  folderActionLabel={folderActionLabel}
+                  onFileAction={onFileAction}
+                  onFolderAction={onFolderAction}
+                  onFileOpen={onFileOpen}
+                  onRequestDiscard={onRequestDiscard}
+                />
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
+/**
  * Renders a set of changed files either flat (one row per file, full path) or
- * grouped by folder. In folder mode each folder header carries a button that
- * runs the same action across every file under it (stage / unstage the whole
- * folder), and the rows show just the file name since the folder is the header.
+ * as a nested folder tree. In tree mode each folder header carries a button
+ * that runs the same action across every file in its whole subtree (stage /
+ * unstage), and folders can be collapsed independently per section.
  */
 function FileList({
   files,
   viewMode,
-  rootFolderLabel,
   actionIcon,
   actionLabel,
   folderActionLabel,
@@ -275,7 +410,6 @@ function FileList({
 }: {
   files: FileStatus[];
   viewMode: ViewMode;
-  rootFolderLabel: string;
   actionIcon: typeof Plus;
   actionLabel: string;
   folderActionLabel: string;
@@ -285,6 +419,8 @@ function FileList({
   onFileOpen: (path: string) => void;
   onRequestDiscard?: (path: string) => void;
 }) {
+  const { collapsed, toggle: toggleFolder } = useCollapsedPaths();
+
   if (viewMode === "flat") {
     return (
       <ul>
@@ -304,47 +440,22 @@ function FileList({
     );
   }
 
-  const FolderActionIcon = actionIcon;
   return (
     <ul>
-      {groupByFolder(files).map((group) => {
-        const display = group.folder === "" ? rootFolderLabel : group.folder;
-        return (
-          <li key={group.folder || "(root)"}>
-            <div className="group flex items-center gap-2 px-3 py-1 text-sm hover:bg-bg-elevated/60">
-              <Folder size={13} className="shrink-0 text-fg-subtle" />
-              <Tooltip label={display} className="min-w-0 flex-1">
-                <span className="min-w-0 flex-1 truncate text-fg-muted">{display}</span>
-              </Tooltip>
-              <Tooltip label={`${folderActionLabel}: ${display}`}>
-                <button
-                  type="button"
-                  aria-label={`${folderActionLabel}: ${display}`}
-                  onClick={() => onFolderAction(group.files.map((f) => f.path))}
-                  className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
-                >
-                  <FolderActionIcon size={14} />
-                </button>
-              </Tooltip>
-            </div>
-            <ul className="pl-3">
-              {group.files.map((file) => (
-                <StatusRow
-                  key={file.path}
-                  file={file}
-                  displayPath={basename(file.path)}
-                  repoPath={repoPath}
-                  actionIcon={actionIcon}
-                  actionLabel={actionLabel}
-                  onAction={onFileAction}
-                  onOpen={onFileOpen}
-                  onRequestDiscard={onRequestDiscard}
-                />
-              ))}
-            </ul>
-          </li>
-        );
-      })}
+      <FileTreeRows
+        nodes={buildFileTree(files)}
+        depth={0}
+        collapsed={collapsed}
+        onToggleCollapse={toggleFolder}
+        repoPath={repoPath}
+        actionIcon={actionIcon}
+        actionLabel={actionLabel}
+        folderActionLabel={folderActionLabel}
+        onFileAction={onFileAction}
+        onFolderAction={onFolderAction}
+        onFileOpen={onFileOpen}
+        onRequestDiscard={onRequestDiscard}
+      />
     </ul>
   );
 }
@@ -582,7 +693,6 @@ export function SourceControlView() {
             <FileList
               files={status!.staged}
               viewMode={viewMode}
-              rootFolderLabel={t("rootFolder")}
               actionIcon={Minus}
               actionLabel={t("unstage")}
               folderActionLabel={t("unstageFolder")}
@@ -627,7 +737,6 @@ export function SourceControlView() {
             <FileList
               files={status!.unstaged}
               viewMode={viewMode}
-              rootFolderLabel={t("rootFolder")}
               actionIcon={Plus}
               actionLabel={t("stage")}
               folderActionLabel={t("stageFolder")}

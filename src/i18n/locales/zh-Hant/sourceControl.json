@@ -10,9 +10,8 @@
   "unstage": "取消暫存",
   "viewFolder": "依資料夾分組",
   "viewFlat": "扁平檢視",
-  "stageFolder": "暫存整個資料夾",
-  "unstageFolder": "取消暫存整個資料夾",
-  "rootFolder": "（根目錄）",
+  "stageFolder": "暫存資料夾（含子資料夾）",
+  "unstageFolder": "取消暫存資料夾（含子資料夾）",
   "commitPlaceholder": "提交訊息",
   "commit": "提交",
   "push": "推送",
@@ -41,5 +40,8 @@
   "discardFailed": "無法捨棄 {{name}} 的變更，檔案可能被鎖定或儲存庫狀態異常",
   "diffPrevChange": "上一個變更",
   "diffNextChange": "下一個變更",
-  "diffUnchangedLines": "$ 行未變更"
+  "diffUnchangedLines": "$ 行未變更",
+  "expandFolder": "展開 {{name}}",
+  "collapseFolder": "收合 {{name}}",
+  "menuViewInGraph": "在 Git Graph 中查看"
 }

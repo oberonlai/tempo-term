@@ -40,7 +40,11 @@
     "aiExplaining": "AI 解讀中…",
     "aiRegenerate": "重新產生",
     "aiNeedKey": "尚未設定 API key，請到設定填入後再試",
-    "aiEmpty": "沒有可解讀的差異"
+    "aiEmpty": "沒有可解讀的差異",
+    "viewFolder": "依資料夾分組",
+    "viewFlat": "扁平檢視",
+    "expandFolder": "展開 {{name}}",
+    "collapseFolder": "收合 {{name}}"
   },
   "menu": {
     "createBranchHere": "在這裡建立分支… (git branch)",
