@@ -97,7 +97,8 @@
     "search": "搜尋",
     "cancel": "取消",
     "save": "儲存",
-    "confirm": "確認"
+    "confirm": "確認",
+    "close": "關閉"
   },
   "paneCapacityAlert": "這個分頁最多只能開 8 個面板，請先關掉一個再試",
   "placeholder": {

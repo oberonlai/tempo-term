@@ -25,6 +25,7 @@ use modules::git::{
     git_fetch, git_file_at_rev, git_graph_log, git_log, git_merge, git_pull, git_push,
     git_push_delete, git_rebase, git_reset, git_resolve_repo, git_restore_file, git_revert,
     git_stage, git_status, git_tag_create, git_tag_delete, git_unstage, git_worktree_info,
+    git_worktree_list,
 };
 use modules::pr::{gh_available, pr_via_api, pr_via_gh};
 use modules::preview::{
@@ -167,6 +168,7 @@ pub fn run() {
             git_resolve_repo,
             git_status,
             git_worktree_info,
+            git_worktree_list,
             git_stage,
             git_unstage,
             git_commit,

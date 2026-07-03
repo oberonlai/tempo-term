@@ -4,6 +4,7 @@ import "@/i18n";
 import { GitGraphTabContent } from "./GitGraphTabContent";
 import { usePendingGraphSelectionStore } from "./lib/pendingGraphSelectionStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useNotifyStore } from "@/stores/notifyStore";
 
 vi.mock("@/modules/source-control/lib/gitBridge", () => ({
   gitResolveRepo: vi.fn().mockResolvedValue("/repo"),
@@ -15,9 +16,10 @@ vi.mock("./lib/gitGraphBridge", () => ({
   gitFetch: vi.fn(),
   gitCommitDetails: vi.fn().mockResolvedValue({ message: "", files: [] }),
   gitCommitFileDiff: vi.fn().mockResolvedValue(""),
+  gitWorktreeList: vi.fn().mockResolvedValue([]),
 }));
 
-import { gitGraphLog } from "./lib/gitGraphBridge";
+import { gitGraphLog, gitWorktreeList } from "./lib/gitGraphBridge";
 
 function commitList(hashes: string[], hasMore: boolean) {
   return {
@@ -36,6 +38,7 @@ function commitList(hashes: string[], hasMore: boolean) {
 describe("GitGraphTabContent pending commit selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(gitWorktreeList).mockResolvedValue([]);
     usePendingGraphSelectionStore.setState({ hash: null });
     useWorkspaceStore.getState().setRoot("/repo");
   });
@@ -182,5 +185,74 @@ describe("GitGraphTabContent pending commit selection", () => {
 
     await waitFor(() => expect(usePendingGraphSelectionStore.getState().hash).toBeNull());
     expect(screen.getAllByText("ccc3333").length).toBeGreaterThan(0);
+  });
+});
+
+describe("GitGraphTabContent worktree selector wiring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usePendingGraphSelectionStore.setState({ hash: null });
+    useWorkspaceStore.getState().setRoot("/repo");
+  });
+
+  it("switches the workspace root when another worktree is picked", async () => {
+    vi.mocked(gitGraphLog).mockResolvedValue(commitList(["aaa1111"], false));
+    vi.mocked(gitWorktreeList).mockResolvedValue([
+      { path: "/repo", branch: "master" },
+      { path: "/repo-dev", branch: "feature" },
+    ]);
+
+    render(<GitGraphTabContent />);
+
+    fireEvent.click((await screen.findAllByLabelText("Worktree"))[0]);
+    fireEvent.click(screen.getByText("repo-dev (feature)"));
+
+    await waitFor(() => expect(useWorkspaceStore.getState().rootPath).toBe("/repo-dev"));
+  });
+
+  it("posts a file-explorer-updated notice after switching worktree", async () => {
+    useNotifyStore.setState({ notice: null });
+    vi.mocked(gitGraphLog).mockResolvedValue(commitList(["aaa1111"], false));
+    vi.mocked(gitWorktreeList).mockResolvedValue([
+      { path: "/repo", branch: "master" },
+      { path: "/repo-dev", branch: "feature" },
+    ]);
+
+    render(<GitGraphTabContent />);
+
+    fireEvent.click((await screen.findAllByLabelText("Worktree"))[0]);
+    fireEvent.click(screen.getByText("repo-dev (feature)"));
+
+    await waitFor(() =>
+      expect(useNotifyStore.getState().notice?.text).toBe("File explorer updated"),
+    );
+  });
+
+  it("refetches the worktree list whenever the graph reloads, so labels track checkouts", async () => {
+    vi.mocked(gitGraphLog).mockResolvedValue(commitList(["aaa1111"], false));
+    vi.mocked(gitWorktreeList).mockResolvedValue([
+      { path: "/repo", branch: "master" },
+      { path: "/repo-dev", branch: "feature" },
+    ]);
+
+    render(<GitGraphTabContent />);
+    await screen.findAllByLabelText("Worktree");
+    const callsBefore = vi.mocked(gitWorktreeList).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(gitWorktreeList).mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+  });
+
+  it("hides the selector when listing worktrees fails", async () => {
+    vi.mocked(gitGraphLog).mockResolvedValue(commitList(["aaa1111"], false));
+    vi.mocked(gitWorktreeList).mockRejectedValue(new Error("not a repo"));
+
+    render(<GitGraphTabContent />);
+    await screen.findByText("msg aaa1111");
+
+    expect(screen.queryByLabelText("Worktree")).not.toBeInTheDocument();
   });
 });

@@ -295,6 +295,52 @@ pub fn worktree_info(path: &str) -> Result<WorktreeInfo, String> {
     })
 }
 
+/// One entry of `git worktree list`: the worktree's absolute path and its
+/// checked-out branch (None on a detached HEAD). Bare entries are skipped.
+#[derive(Debug, Clone, Serialize)]
+pub struct WorktreeListItem {
+    pub path: String,
+    pub branch: Option<String>,
+}
+
+/// Lists every worktree of the repository via `git worktree list --porcelain`:
+/// blank-line-separated blocks of `worktree <path>`, `HEAD <sha>`, then
+/// `branch refs/heads/<name>` or `detached`. A `bare` block has no working
+/// tree to switch to and a `prunable` one no longer exists on disk, so both
+/// are dropped — offering either as a switch target would strand the app's
+/// workspace root somewhere unusable.
+pub fn worktree_list(repo_path: &str) -> Result<Vec<WorktreeListItem>, String> {
+    let stdout = run_git(repo_path, &["worktree", "list", "--porcelain"])?;
+    let mut items = Vec::new();
+    let mut path: Option<String> = None;
+    let mut branch: Option<String> = None;
+    let mut skip = false;
+
+    for line in stdout.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(p) = path.take() {
+                if !skip {
+                    items.push(WorktreeListItem {
+                        path: p,
+                        branch: branch.take(),
+                    });
+                }
+            }
+            branch = None;
+            skip = false;
+        } else if let Some(rest) = line.strip_prefix("worktree ") {
+            path = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
+        } else if line == "bare" || line == "prunable" || line.starts_with("prunable ") {
+            skip = true;
+        }
+        // `HEAD <sha>` and `detached` lines are ignored: branch simply stays
+        // None for a detached worktree.
+    }
+    Ok(items)
+}
+
 pub fn stage(repo_path: &str, path: &str) -> Result<(), String> {
     let repo = Repository::open(repo_path).map_err(|e| e.message().to_string())?;
     let mut index = repo.index().map_err(|e| e.message().to_string())?;
@@ -386,6 +432,15 @@ pub async fn git_worktree_info(path: String) -> Result<WorktreeInfo, String> {
     // Spawns a git subprocess per call; run it off the main thread so a slow repo
     // (or several at once when the workspace panel mounts) never freezes the UI.
     tauri::async_runtime::spawn_blocking(move || worktree_info(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_worktree_list(path: String) -> Result<Vec<WorktreeListItem>, String> {
+    // Spawns a git subprocess; run it off the main thread so a slow repo never
+    // freezes the UI (same rationale as git_worktree_info above).
+    tauri::async_runtime::spawn_blocking(move || worktree_list(&path))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1135,6 +1190,103 @@ mod tests {
     fn worktree_info_errors_outside_a_repo() {
         let dir = temp_repo_dir("wt-norepo");
         assert!(worktree_info(&dir.to_string_lossy()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worktree_list_reports_main_and_linked_worktrees() {
+        let root = temp_repo_dir("wtl-linked");
+        let main = root.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let main_path = main.to_string_lossy().to_string();
+        run_git(&main_path, &["init", "-b", "main"]).unwrap();
+        run_git(&main_path, &["config", "user.email", "t@t.dev"]).unwrap();
+        run_git(&main_path, &["config", "user.name", "Tester"]).unwrap();
+        std::fs::write(main.join("a.txt"), "hi").unwrap();
+        run_git(&main_path, &["add", "."]).unwrap();
+        run_git(&main_path, &["commit", "-m", "init"]).unwrap();
+        let wt = root.join("wt");
+        let wt_path = wt.to_string_lossy().to_string();
+        run_git(&main_path, &["worktree", "add", &wt_path, "-b", "feature"]).unwrap();
+
+        let items = worktree_list(&main_path).unwrap();
+        assert_eq!(items.len(), 2);
+        // git prints canonicalized absolute paths (e.g. /private/var vs /var on
+        // macOS temp dirs), so assert on the unambiguous path suffix.
+        assert!(items[0].path.ends_with("/main"));
+        assert_eq!(items[0].branch.as_deref(), Some("main"));
+        assert!(items[1].path.ends_with("/wt"));
+        assert_eq!(items[1].branch.as_deref(), Some("feature"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn worktree_list_reports_detached_worktree_without_branch() {
+        let root = temp_repo_dir("wtl-detached");
+        let main = root.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let main_path = main.to_string_lossy().to_string();
+        run_git(&main_path, &["init", "-b", "main"]).unwrap();
+        run_git(&main_path, &["config", "user.email", "t@t.dev"]).unwrap();
+        run_git(&main_path, &["config", "user.name", "Tester"]).unwrap();
+        std::fs::write(main.join("a.txt"), "hi").unwrap();
+        run_git(&main_path, &["add", "."]).unwrap();
+        run_git(&main_path, &["commit", "-m", "init"]).unwrap();
+        let wt = root.join("wt");
+        let wt_path = wt.to_string_lossy().to_string();
+        run_git(&main_path, &["worktree", "add", "--detach", &wt_path]).unwrap();
+
+        let items = worktree_list(&main_path).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].branch, None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn worktree_list_skips_prunable_worktrees_whose_directory_is_gone() {
+        let root = temp_repo_dir("wtl-prunable");
+        let main = root.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let main_path = main.to_string_lossy().to_string();
+        run_git(&main_path, &["init", "-b", "main"]).unwrap();
+        run_git(&main_path, &["config", "user.email", "t@t.dev"]).unwrap();
+        run_git(&main_path, &["config", "user.name", "Tester"]).unwrap();
+        std::fs::write(main.join("a.txt"), "hi").unwrap();
+        run_git(&main_path, &["add", "."]).unwrap();
+        run_git(&main_path, &["commit", "-m", "init"]).unwrap();
+        let wt = root.join("wt");
+        let wt_path = wt.to_string_lossy().to_string();
+        run_git(&main_path, &["worktree", "add", &wt_path, "-b", "feature"]).unwrap();
+
+        // Delete the worktree directory without `git worktree prune` — git
+        // still reports the entry, marked `prunable`, and switching the app
+        // to a nonexistent directory would strand the workspace root there.
+        std::fs::remove_dir_all(&wt).unwrap();
+
+        let items = worktree_list(&main_path).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].path.ends_with("/main"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn worktree_list_returns_single_item_for_a_plain_repo() {
+        let dir = temp_repo_dir("wtl-single");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init", "-b", "main"]).unwrap();
+        run_git(&path, &["config", "user.email", "t@t.dev"]).unwrap();
+        run_git(&path, &["config", "user.name", "Tester"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "hi").unwrap();
+        run_git(&path, &["add", "."]).unwrap();
+        run_git(&path, &["commit", "-m", "init"]).unwrap();
+
+        let items = worktree_list(&path).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].branch.as_deref(), Some("main"));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

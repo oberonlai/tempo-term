@@ -97,7 +97,8 @@
     "search": "Search",
     "cancel": "Cancel",
     "save": "Save",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "close": "Close"
   },
   "paneCapacityAlert": "This tab can hold at most 8 panes — close one and try again",
   "placeholder": {

@@ -56,10 +56,13 @@ const labels: GitGraphToolbarLabels = {
   commitOrder: "Commit order",
   orderDate: "Date order",
   orderTopo: "Topological order",
+  worktree: "Worktree",
+  switchBranch: "Switch Branch",
 };
 
 const branches: Branch[] = [
   { name: "master", isRemote: false } as Branch,
+  { name: "dev", isRemote: false } as Branch,
   { name: "origin/master", isRemote: true } as Branch,
 ];
 
@@ -84,6 +87,11 @@ function renderToolbar(overrides: Partial<Parameters<typeof GitGraphToolbar>[0]>
     fetching: false,
     refreshing: false,
     currentBranch: "master",
+    worktrees: [],
+    currentWorktreePath: null,
+    onSelectWorktree: vi.fn(),
+    onCheckoutBranch: vi.fn(),
+    onCheckoutRemoteBranch: vi.fn(),
     labels,
     ...overrides,
   };
@@ -211,5 +219,176 @@ describe("GitGraphToolbar commit ordering", () => {
 
     fireEvent.click(screen.getByText(labels.orderTopo));
     expect(props.onChangeOrder).toHaveBeenCalledWith("topo");
+  });
+});
+
+describe("GitGraphToolbar worktree selector", () => {
+  const twoWorktrees = [
+    { path: "/repos/app", branch: "master" },
+    { path: "/repos/app-dev", branch: "feature" },
+  ];
+
+  it("is hidden when the repo has a single worktree", () => {
+    renderToolbar({
+      worktrees: [{ path: "/repos/app", branch: "master" }],
+      currentWorktreePath: "/repos/app",
+    });
+
+    expect(screen.queryByText(`${labels.worktree}:`)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(labels.worktree)).not.toBeInTheDocument();
+  });
+
+  it("shows the current worktree as the selected value when there are several", () => {
+    renderToolbar({ worktrees: twoWorktrees, currentWorktreePath: "/repos/app" });
+
+    expect(screen.getByText(`${labels.worktree}:`)).toBeInTheDocument();
+    expect(screen.getAllByLabelText(labels.worktree)[0]).toHaveTextContent("app (master)");
+  });
+
+  it("selecting another worktree reports its path", () => {
+    const props = renderToolbar({
+      worktrees: twoWorktrees,
+      currentWorktreePath: "/repos/app",
+    });
+
+    fireEvent.click(screen.getAllByLabelText(labels.worktree)[0]);
+    fireEvent.click(screen.getByText("app-dev (feature)"));
+
+    expect(props.onSelectWorktree).toHaveBeenCalledWith("/repos/app-dev");
+  });
+
+  it("re-picking the current worktree does not fire a switch", () => {
+    const props = renderToolbar({
+      worktrees: twoWorktrees,
+      currentWorktreePath: "/repos/app",
+    });
+
+    fireEvent.click(screen.getAllByLabelText(labels.worktree)[0]);
+    fireEvent.click(screen.getByRole("button", { name: /app \(master\)/ }));
+
+    expect(props.onSelectWorktree).not.toHaveBeenCalled();
+  });
+
+  it("matches the current worktree across mixed slash directions (Windows)", () => {
+    const props = renderToolbar({
+      worktrees: [
+        { path: "C:\\repos\\app", branch: "master" },
+        { path: "C:\\repos\\app-dev", branch: "feature" },
+      ],
+      // resolve_repo / system APIs may hand back forward slashes for the
+      // same directory git printed with backslashes.
+      currentWorktreePath: "C:/repos/app",
+    });
+
+    expect(screen.getAllByLabelText(labels.worktree)[0]).toHaveTextContent("app (master)");
+
+    // Re-picking the current worktree must be recognized as current — no
+    // redundant workspace switch.
+    fireEvent.click(screen.getAllByLabelText(labels.worktree)[0]);
+    fireEvent.click(screen.getByRole("button", { name: /app \(master\)/ }));
+    expect(props.onSelectWorktree).not.toHaveBeenCalled();
+  });
+
+  it("falls back to full paths when two labels would collide", () => {
+    renderToolbar({
+      worktrees: [
+        { path: "/a/repo", branch: "main" },
+        { path: "/b/repo", branch: "main" },
+      ],
+      currentWorktreePath: "/a/repo",
+    });
+
+    expect(screen.getAllByLabelText(labels.worktree)[0]).toHaveTextContent("/a/repo");
+  });
+});
+
+describe("GitGraphToolbar branch-switch menu", () => {
+  it("opens from the HEAD button and lists local branches with the current one checked", () => {
+    renderToolbar({ currentBranch: "master" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch Branch/ }));
+
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("master")).toBeInTheDocument();
+    expect(within(menu).getByText("dev")).toBeInTheDocument();
+    expect(within(menu).getByText("origin/master")).toBeInTheDocument();
+  });
+
+  it("clicking another local branch checks it out and closes the menu", () => {
+    const props = renderToolbar({ currentBranch: "master" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch Branch/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("dev"));
+
+    expect(props.onCheckoutBranch).toHaveBeenCalledWith("dev");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("clicking the current branch closes without checking out", () => {
+    const props = renderToolbar({ currentBranch: "master" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch Branch/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("master"));
+
+    expect(props.onCheckoutBranch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("clicking a remote branch routes to the tracking flow", () => {
+    const props = renderToolbar({ currentBranch: "master" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch Branch/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("origin/master"));
+
+    expect(props.onCheckoutRemoteBranch).toHaveBeenCalledWith("origin/master");
+  });
+
+  it("compact mode reaches the same menu through the overflow HEAD row", () => {
+    const props = renderToolbar({ currentBranch: "master" });
+    setToolbarWidth(360);
+
+    fireEvent.click(screen.getByLabelText(labels.more));
+    fireEvent.click(screen.getByRole("button", { name: /Switch Branch/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("dev"));
+
+    expect(props.onCheckoutBranch).toHaveBeenCalledWith("dev");
+  });
+});
+
+describe("GitGraphToolbar branch-switch menu guards", () => {
+  it("announces the current branch in the HEAD button's accessible name", () => {
+    renderToolbar({ currentBranch: "master" });
+
+    expect(
+      screen.getByRole("button", { name: "Switch Branch (HEAD: master)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the HEAD button while the branch list is empty", () => {
+    renderToolbar({ branches: [] });
+
+    expect(screen.getByRole("button", { name: /Switch Branch/ })).toBeDisabled();
+  });
+
+  it("disables a local branch that another worktree has checked out", () => {
+    const props = renderToolbar({
+      currentBranch: "master",
+      branches: [
+        { name: "master", isRemote: false } as Branch,
+        { name: "feature", isRemote: false } as Branch,
+      ],
+      worktrees: [
+        { path: "/repos/app", branch: "master" },
+        { path: "/repos/app-dev", branch: "feature" },
+      ],
+      currentWorktreePath: "/repos/app",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch Branch/ }));
+    const entry = within(screen.getByRole("menu")).getByText("feature").closest("button");
+    expect(entry).toBeDisabled();
+
+    fireEvent.click(within(screen.getByRole("menu")).getByText("feature"));
+    expect(props.onCheckoutBranch).not.toHaveBeenCalled();
   });
 });

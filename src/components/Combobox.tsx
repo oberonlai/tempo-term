@@ -16,6 +16,8 @@ interface ComboboxProps {
   size?: "sm" | "md";
   /** Override the text size (trigger and options), e.g. "text-[13px]". */
   textClassName?: string;
+  /** Show trigger value and options in full instead of ellipsizing them. */
+  noTruncate?: boolean;
 }
 
 /**
@@ -34,11 +36,13 @@ export function Combobox({
   dropUp = false,
   size = "md",
   textClassName,
+  noTruncate = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const dense = size === "sm";
   const textClass = textClassName ?? (dense ? "text-xs" : "text-sm");
+  const clipClass = noTruncate ? "whitespace-nowrap" : "truncate";
   const fieldClass = `${dense ? "px-2 py-0.5" : "px-3 py-2"} ${textClass}`;
   const optionClass = `${dense ? "px-2 py-1" : "px-3 py-2"} ${textClass}`;
 
@@ -83,7 +87,7 @@ export function Combobox({
             onClick={() => setOpen((o) => !o)}
             className={`flex min-w-0 flex-1 items-center text-left ${dense ? "text-fg-muted" : "text-fg"} ${fieldClass}`}
           >
-            <span className="truncate">{value}</span>
+            <span className={clipClass}>{value}</span>
           </button>
         )}
         <button
@@ -103,9 +107,9 @@ export function Combobox({
       {open && (
         <ul
           data-combobox
-          className={`absolute left-0 z-50 max-h-60 w-max min-w-full max-w-[16rem] space-y-0.5 overflow-y-auto rounded-lg border border-border-strong bg-bg-elevated p-1 shadow-xl ${
-            dropUp ? "bottom-full mb-1.5" : "top-full mt-1.5"
-          }`}
+          className={`absolute left-0 z-50 max-h-60 w-max min-w-full space-y-0.5 overflow-y-auto rounded-lg border border-border-strong bg-bg-elevated p-1 shadow-xl ${
+            noTruncate ? "" : "max-w-[16rem]"
+          } ${dropUp ? "bottom-full mb-1.5" : "top-full mt-1.5"}`}
         >
           {list.map((opt) => {
             const active = opt === value;
@@ -121,7 +125,7 @@ export function Combobox({
                     active ? "bg-bg text-fg" : "text-fg-muted hover:bg-bg hover:text-fg"
                   }`}
                 >
-                  <span className="truncate">{opt}</span>
+                  <span className={clipClass}>{opt}</span>
                   {active && <Check size={14} className="shrink-0 text-accent" />}
                 </button>
               </li>

@@ -24,7 +24,10 @@
     "more": "更多",
     "commitOrder": "排序方式",
     "orderDate": "日期順序",
-    "orderTopo": "拓樸順序"
+    "orderTopo": "拓樸順序",
+    "worktree": "Worktree",
+    "switchBranch": "切換分支",
+    "worktreeSwitched": "檔案總管已更新"
   },
   "details": {
     "author": "作者",

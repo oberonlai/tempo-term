@@ -120,3 +120,15 @@ export function gitCommitFileDiff(
 ): Promise<string> {
   return invoke<string>("git_commit_file_diff", { repoPath, commit, file });
 }
+
+/** One worktree of the repository, from `git worktree list`. */
+export interface WorktreeItem {
+  path: string;
+  /** Checked-out branch, or null when the worktree is on a detached HEAD. */
+  branch: string | null;
+}
+
+/** List every worktree of the repository (main first, as git reports them). */
+export function gitWorktreeList(repo: string): Promise<WorktreeItem[]> {
+  return invoke<WorktreeItem[]>("git_worktree_list", { path: repo });
+}

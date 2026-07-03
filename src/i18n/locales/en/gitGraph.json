@@ -24,7 +24,10 @@
     "more": "More",
     "commitOrder": "Commit order",
     "orderDate": "Date order",
-    "orderTopo": "Topological order"
+    "orderTopo": "Topological order",
+    "worktree": "Worktree",
+    "switchBranch": "Switch Branch",
+    "worktreeSwitched": "File explorer updated"
   },
   "details": {
     "author": "Author",

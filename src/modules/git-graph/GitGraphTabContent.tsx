@@ -5,6 +5,7 @@ import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { Resizer } from "@/components/Resizer";
 import { gitResolveRepo } from "@/modules/source-control/lib/gitBridge";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useNotifyStore } from "@/stores/notifyStore";
 import { GitGraph, type GitGraphLabels } from "./GitGraph";
 import { CommitInputModal, type InputField } from "./CommitInputModal";
 import { CommitDetailsPanel, type CommitDetailsLabels } from "./CommitDetailsPanel";
@@ -25,6 +26,8 @@ import {
   gitRevert,
   gitTagCreate,
   gitTagDelete,
+  gitWorktreeList,
+  type WorktreeItem,
 } from "./lib/gitGraphBridge";
 import { GitGraphToolbar, type GitGraphToolbarLabels } from "./GitGraphToolbar";
 import { usePendingGraphSelectionStore } from "./lib/pendingGraphSelectionStore";
@@ -70,6 +73,7 @@ export function GitGraphTabContent() {
   const [resolved, setResolved] = useState(false);
   const [commits, setCommits] = useState<CommitNode[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [worktrees, setWorktrees] = useState<WorktreeItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<CommitNode | null>(null);
@@ -117,16 +121,22 @@ export function GitGraphTabContent() {
   const reload = useCallback(
     async (repoPath: string, nextLimit: number, opts: GraphOptions) => {
       try {
-        const [log, branchList] = await Promise.all([
+        const [log, branchList, worktreeList] = await Promise.all([
           gitGraphLog(repoPath, nextLimit, opts),
           gitBranches(repoPath),
+          // Refetched on every reload so the selector's branch labels track
+          // in-app checkouts and `git worktree add/remove` runs in the app's
+          // own terminal; a failure just hides the selector.
+          gitWorktreeList(repoPath).catch((): WorktreeItem[] => []),
         ]);
         setCommits(log.commits);
         setHasMore(log.hasMore);
         setBranches(branchList);
+        setWorktrees(worktreeList);
       } catch (err: unknown) {
         setCommits([]);
         setBranches([]);
+        setWorktrees([]);
         setHasMore(false);
         setError(getErrorMessage(err));
       }
@@ -162,9 +172,22 @@ export function GitGraphTabContent() {
     };
   }, [rootPath]);
 
+  const handleSelectWorktree = useCallback(
+    (path: string) => {
+      // Switching worktree = switching the app's workspace root; the rootPath
+      // effect above re-resolves the repo and reloads everything, and the
+      // sidebar / file explorer follow the same store. The toast makes that
+      // side effect visible from inside the Git Graph tab.
+      useWorkspaceStore.getState().setRoot(path);
+      useNotifyStore.getState().notify(t("toolbar.worktreeSwitched"));
+    },
+    [t],
+  );
+
   // Initial load, and reload whenever a display option changes.
   useEffect(() => {
     if (!repo) {
+      setWorktrees([]);
       return;
     }
     setLimit(PAGE_SIZE);
@@ -310,6 +333,30 @@ export function GitGraphTabContent() {
     }
   }, [repo, limit, reload, options.branch, options.includeRemotes, options.includeTags, options.includeStashes, options.order]);
 
+  // Shared by the ref context menu and the toolbar's branch menu: prompt for a
+  // local name, then create the tracking branch.
+  const openCheckoutRemoteModal = useCallback(
+    (refName: string) => {
+      const { branch } = splitRemoteRef(refName);
+      setModal({
+        title: t("modal.checkoutRemote.title"),
+        confirmLabel: t("modal.checkoutRemote.confirm"),
+        fields: [
+          {
+            key: "name",
+            label: t("modal.branchName"),
+            placeholder: t("modal.branchPlaceholder"),
+            required: true,
+            defaultValue: branch,
+          },
+        ],
+        onConfirm: (values) =>
+          void runAction(() => gitBranchCheckoutTrack(repo!, values.name, refName)),
+      });
+    },
+    [t, runAction, repo],
+  );
+
   const toolbarLabels: GitGraphToolbarLabels = {
     branches: t("toolbar.branches"),
     showAll: t("toolbar.showAll"),
@@ -328,6 +375,8 @@ export function GitGraphTabContent() {
     commitOrder: t("toolbar.commitOrder"),
     orderDate: t("toolbar.orderDate"),
     orderTopo: t("toolbar.orderTopo"),
+    worktree: t("toolbar.worktree"),
+    switchBranch: t("toolbar.switchBranch"),
   };
 
   const persistDetailsHeight = useCallback(() => {
@@ -454,24 +503,7 @@ export function GitGraphTabContent() {
         onMerge: () => void runAction(() => gitMerge(repo!, ref.name)),
         onDeleteBranch: () => void runAction(() => gitBranchDelete(repo!, ref.name, true)),
         onDeleteTag: () => void runAction(() => gitTagDelete(repo!, ref.name)),
-        onCheckoutRemote: () => {
-          const { branch } = splitRemoteRef(ref.name);
-          setModal({
-            title: t("modal.checkoutRemote.title"),
-            confirmLabel: t("modal.checkoutRemote.confirm"),
-            fields: [
-              {
-                key: "name",
-                label: t("modal.branchName"),
-                placeholder: t("modal.branchPlaceholder"),
-                required: true,
-                defaultValue: branch,
-              },
-            ],
-            onConfirm: (values) =>
-              void runAction(() => gitBranchCheckoutTrack(repo!, values.name, ref.name)),
-          });
-        },
+        onCheckoutRemote: () => openCheckoutRemoteModal(ref.name),
         onMergeRemote: () => void runAction(() => gitMerge(repo!, ref.name)),
         onPull: () => {
           const { remote, branch } = splitRemoteRef(ref.name);
@@ -537,6 +569,11 @@ export function GitGraphTabContent() {
           fetching={fetching}
           refreshing={busy}
           currentBranch={currentBranch}
+          worktrees={worktrees}
+          currentWorktreePath={repo}
+          onSelectWorktree={handleSelectWorktree}
+          onCheckoutBranch={(name) => void runAction(() => gitBranchCheckout(repo!, name))}
+          onCheckoutRemoteBranch={openCheckoutRemoteModal}
           labels={toolbarLabels}
         />
       </div>

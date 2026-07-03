@@ -8,6 +8,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateModal } from "@/components/UpdateModal";
 import { UpdateToast } from "@/components/UpdateToast";
+import { NotifyToast } from "@/components/NotifyToast";
 import { TabsArea } from "@/components/TabsArea";
 import { useUiStore } from "@/stores/uiStore";
 import { useUpdaterStore } from "@/stores/updaterStore";
@@ -436,6 +437,7 @@ function App() {
       {settingsOpen && <SettingsModal />}
       <UpdateModal />
       <UpdateToast />
+      <NotifyToast />
       <SshPromptDialog />
       {pendingCloseAction && (
         <ConfirmDialog
