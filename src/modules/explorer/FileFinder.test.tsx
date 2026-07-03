@@ -44,6 +44,55 @@ describe("FileFinder opening a file", () => {
   });
 });
 
+describe("FileFinder keyboard navigation", () => {
+  beforeEach(() => {
+    useTabsStore.setState({ tabs: [], activeId: null, spaces: [], activeSpaceId: null });
+  });
+
+  it("moves the active selection down with ArrowDown and opens it on Enter", async () => {
+    render(<FileFinder root="/p" onClose={() => {}} />);
+    await waitFor(() => screen.getByText("util.ts"));
+
+    const input = screen.getByLabelText("findFiles");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const tabs = useTabsStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    const pane = tabs[0].paneTree;
+    expect(pane.kind === "leaf" && pane.pane).toMatchObject({
+      kind: "editor",
+      path: "/p/util.ts",
+    });
+  });
+
+  it("wraps to the last result when ArrowUp is pressed at the top", async () => {
+    render(<FileFinder root="/p" onClose={() => {}} />);
+    await waitFor(() => screen.getByText("util.ts"));
+
+    const input = screen.getByLabelText("findFiles");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const tabs = useTabsStore.getState().tabs;
+    const pane = tabs[0].paneTree;
+    expect(pane.kind === "leaf" && pane.pane).toMatchObject({
+      kind: "editor",
+      path: "/p/util.ts",
+    });
+  });
+
+  it("ignores Enter while an IME composition is in progress", async () => {
+    render(<FileFinder root="/p" onClose={() => {}} />);
+    await waitFor(() => screen.getByText("main.ts"));
+
+    const input = screen.getByLabelText("findFiles");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+
+    expect(useTabsStore.getState().tabs).toHaveLength(0);
+  });
+});
+
 describe("FileFinder at pane capacity", () => {
   beforeEach(() => {
     useTabsStore.setState({ tabs: [], activeId: null, spaces: [], activeSpaceId: null });

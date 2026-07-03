@@ -5,6 +5,7 @@ import { fsListFiles } from "./lib/fsBridge";
 import { fuzzyRank } from "./lib/fuzzy";
 import { relativePath } from "./lib/paths";
 import { InfoDialog } from "@/components/InfoDialog";
+import { Tooltip } from "@/components/Tooltip";
 import { useTabsStore } from "@/stores/tabsStore";
 
 interface FileFinderProps {
@@ -18,7 +19,9 @@ export function FileFinder({ root, onClose }: FileFinderProps) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<string[]>([]);
   const [atCapacity, setAtCapacity] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeResultRef = useRef<HTMLButtonElement | null>(null);
   const openFromSidebar = useTabsStore((s) => s.openFromSidebar);
 
   useEffect(() => {
@@ -38,6 +41,16 @@ export function FileFinder({ root, onClose }: FileFinderProps) {
 
   const results = useMemo(() => fuzzyRank(query, files).slice(0, 50), [query, files]);
 
+  // The result set changes on every keystroke; keep the highlighted row
+  // pinned to the top match instead of an index that now points elsewhere.
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [results]);
+
+  useEffect(() => {
+    activeResultRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
   function open(path: string) {
     const result = openFromSidebar({ kind: "editor", path });
     if (result.status === "at-capacity") {
@@ -45,6 +58,25 @@ export function FileFinder({ root, onClose }: FileFinderProps) {
       return;
     }
     onClose();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // While an IME candidate window is open, Enter (and often the arrow keys)
+    // commit/navigate the candidate, not this list — let them through.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
+    if (e.key === "Escape") {
+      onClose();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => (results.length ? (i + 1) % results.length : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => (results.length ? (i - 1 + results.length) % results.length : 0));
+    } else if (e.key === "Enter" && results[activeIndex]) {
+      open(results[activeIndex]);
+    }
   }
 
   return (
@@ -61,13 +93,7 @@ export function FileFinder({ root, onClose }: FileFinderProps) {
             placeholder={t("findPlaceholder")}
             aria-label={t("findFiles")}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                onClose();
-              } else if (e.key === "Enter" && results[0]) {
-                open(results[0]);
-              }
-            }}
+            onKeyDown={handleKeyDown}
             className="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
           />
         </div>
@@ -77,17 +103,28 @@ export function FileFinder({ root, onClose }: FileFinderProps) {
               {t("noResults")}
             </li>
           ) : (
-            results.map((path) => (
-              <li key={path}>
-                <button
-                  type="button"
-                  onClick={() => open(path)}
-                  className="block w-full truncate px-3 py-1.5 text-left text-sm text-fg-muted hover:bg-bg hover:text-fg"
-                >
-                  {relativePath(path, root)}
-                </button>
-              </li>
-            ))
+            results.map((path, index) => {
+              const relative = relativePath(path, root);
+              const active = index === activeIndex;
+              return (
+                <li key={path}>
+                  <Tooltip label={relative} className="w-full">
+                    <button
+                      ref={active ? activeResultRef : undefined}
+                      type="button"
+                      onClick={() => open(path)}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      aria-selected={active}
+                      className={`block w-full truncate px-3 py-1.5 text-left text-sm ${
+                        active ? "bg-bg text-fg" : "text-fg-muted hover:bg-bg hover:text-fg"
+                      }`}
+                    >
+                      {relative}
+                    </button>
+                  </Tooltip>
+                </li>
+              );
+            })
           )}
         </ul>
       </div>
