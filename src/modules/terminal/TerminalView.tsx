@@ -79,6 +79,7 @@ import { buildCellPositions, gatherLogicalLine } from "./lib/cellPositions";
 import { terminalKeySequence } from "./lib/terminalKeymap";
 import { shouldCdToRoot } from "./lib/cwdSync";
 import { parseOsc7Cwd } from "./lib/osc7";
+import { applyTerminalPadding } from "./lib/terminalPadding";
 import { debounce } from "@/lib/debounce";
 import { dropOverlayClassName } from "@/components/EntryDropOverlay";
 import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
@@ -166,6 +167,11 @@ export function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<TerminalHandle | null>(null);
   const sessionRef = useRef<PtySession | SshSession | null>(null);
+  // The debounced PTY-resize pusher created in the mount effect (see its
+  // comment for why it's debounced), exposed here so other effects that
+  // change the pane's size (e.g. the padding-change effect below) can share
+  // the same debounce instead of spamming the shell with their own resize.
+  const pushPtySizeRef = useRef<(() => void) | null>(null);
   const sshRef = useRef(ssh);
   sshRef.current = ssh;
   const onExitRef = useRef(onExit);
@@ -304,6 +310,11 @@ export function TerminalView({
     handleRef.current = handle;
     const { term, fit } = handle;
     term.open(container);
+    // Padding must live on term.element (read by FitAddon below), not on
+    // `container` — see applyTerminalPadding for why.
+    if (term.element) {
+      applyTerminalPadding(term.element, useSettingsStore.getState().terminalPadding);
+    }
 
     // Batch live PTY/SSH output through a frame-scheduled writer so a flood
     // (cat a huge file, runaway logs) can't block the UI thread. One-shot writes
@@ -916,6 +927,7 @@ export function TerminalView({
         void session.resize(term.cols, term.rows);
       }
     }, 80);
+    pushPtySizeRef.current = pushPtySize;
     const observer = new ResizeObserver(() => {
       safeFit();
       pushPtySize();
@@ -932,6 +944,7 @@ export function TerminalView({
       writeListener.dispose();
       observer.disconnect();
       pushPtySize.cancel();
+      pushPtySizeRef.current = null;
       document.removeEventListener("keydown", onKeyDownCapture, true);
       document.removeEventListener("paste", onPasteCapture, true);
       statusOscHandler.dispose();
@@ -1011,12 +1024,21 @@ export function TerminalView({
     }
   }, [themeId]);
 
-  // The pane's inner padding is configurable; re-fit so the grid recomputes.
+  // The pane's inner padding is configurable via a settings-panel slider,
+  // which fires this effect on every value while the user drags — apply it
+  // to term.element (not `container` — see applyTerminalPadding) and re-fit
+  // immediately so the grid keeps pace with the drag, but push the PTY resize
+  // (SIGWINCH) through the shared debounced pusher so a fast drag doesn't
+  // spam the shell with reprinted prompts (same reasoning as the ResizeObserver
+  // above).
   useEffect(() => {
     const handle = handleRef.current;
     const container = containerRef.current;
     if (!handle || !container) {
       return;
+    }
+    if (handle.term.element) {
+      applyTerminalPadding(handle.term.element, terminalPadding);
     }
     if (container.clientWidth > 0 && container.clientHeight > 0) {
       try {
@@ -1024,7 +1046,7 @@ export function TerminalView({
       } catch {
         // ignore transient zero-size
       }
-      sessionRef.current?.resize(handle.term.cols, handle.term.rows);
+      pushPtySizeRef.current?.();
     }
   }, [terminalPadding]);
 
@@ -1254,8 +1276,6 @@ export function TerminalView({
     connectNowRef.current?.();
   }, [reconnectTrigger]);
 
-  // Match the padding gutter to the terminal's own background so the inset
-  // reads as breathing room rather than a different-coloured frame.
   function isExternalFileDrag(data: DataTransfer): boolean {
     if (getDraggedEntry()) {
       return false;
@@ -1295,11 +1315,13 @@ export function TerminalView({
   }
 
   return (
+    // No padding here: it's applied to term.element (see applyTerminalPadding)
+    // so FitAddon accounts for it. The background still matches the terminal's
+    // own so that gutter reads as breathing room, not a different-coloured frame.
     <div
       ref={containerRef}
       className="relative h-full w-full"
       style={{
-        padding: terminalPadding,
         backgroundColor: getTheme(themeId).terminal.background,
       }}
       onDragEnter={(event) => {
