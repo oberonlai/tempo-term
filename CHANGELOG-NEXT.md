@@ -15,6 +15,10 @@
 
 ### fix
 
+### 感謝
+
+- 感謝 @j7-dev 貢獻 Windows 終端機工作目錄跟隨功能（#115）
+
 ## English
 
 ### feat
@@ -31,3 +35,7 @@
 - The tab close button (✕) now shows an "Unsaved changes" hint on hover when the tab has unsaved edits
 
 ### fix
+
+### Thanks
+
+- Thanks to @j7-dev for contributing the Windows terminal cwd-following feature (#115)
