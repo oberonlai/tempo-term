@@ -1021,6 +1021,47 @@ pub fn commit_file_diff(repo_path: &str, commit: &str, file: &str) -> Result<Str
     Ok(diff)
 }
 
+/// 兩個任意 commit 之間變更的檔案清單(`git diff --name-status from to`)。
+/// 不像 commit_details 限定「對第一個 parent」，from/to 可以是歷史上任意兩點。
+pub fn commit_range_files(
+    repo_path: &str,
+    from: &str,
+    to: &str,
+) -> Result<Vec<CommitFileChange>, String> {
+    let from = from.trim();
+    let to = to.trim();
+    if from.is_empty() || to.is_empty() {
+        return Err("commit hash is required".to_string());
+    }
+    ensure_not_flag(from)?;
+    ensure_not_flag(to)?;
+
+    let name_status = run_git(repo_path, &["diff", "--name-status", from, to])?;
+    let files = name_status
+        .lines()
+        .filter_map(parse_name_status_line)
+        .collect();
+    Ok(files)
+}
+
+/// 兩個任意 commit 之間、單一檔案的 diff(`git diff from to -- file`)。
+pub fn commit_range_file_diff(
+    repo_path: &str,
+    from: &str,
+    to: &str,
+    file: &str,
+) -> Result<String, String> {
+    let from = from.trim();
+    let to = to.trim();
+    if from.is_empty() || to.is_empty() {
+        return Err("commit hash is required".to_string());
+    }
+    ensure_not_flag(from)?;
+    ensure_not_flag(to)?;
+
+    run_git(repo_path, &["diff", from, to, "--", file])
+}
+
 #[tauri::command]
 pub fn git_log(repo_path: String, limit: Option<usize>) -> Result<Vec<CommitInfo>, String> {
     log(&repo_path, limit.unwrap_or(50))
@@ -1157,6 +1198,25 @@ pub fn git_commit_file_diff(
     file: String,
 ) -> Result<String, String> {
     commit_file_diff(&repo_path, &commit, &file)
+}
+
+#[tauri::command]
+pub fn git_commit_range_files(
+    repo_path: String,
+    from: String,
+    to: String,
+) -> Result<Vec<CommitFileChange>, String> {
+    commit_range_files(&repo_path, &from, &to)
+}
+
+#[tauri::command]
+pub fn git_commit_range_file_diff(
+    repo_path: String,
+    from: String,
+    to: String,
+    file: String,
+) -> Result<String, String> {
+    commit_range_file_diff(&repo_path, &from, &to, &file)
 }
 
 #[cfg(test)]
@@ -1521,6 +1581,47 @@ mod tests {
         assert!(ensure_not_flag("a1b2c3d").is_ok());
         assert!(ensure_not_flag("-x").is_err());
         assert!(ensure_not_flag("--upload-pack=evil").is_err());
+
+        let err = commit_range_files("/no/such/repo", "-x", "HEAD").unwrap_err();
+        assert!(err.to_lowercase().contains("flag"), "got: {err}");
+        let err = commit_range_file_diff("/no/such/repo", "HEAD", "-x", "a.txt").unwrap_err();
+        assert!(err.to_lowercase().contains("flag"), "got: {err}");
+    }
+
+    #[test]
+    fn commit_range_files_and_diff_between_arbitrary_commits() {
+        let dir = temp_repo_dir("range-diff");
+        let path = dir.to_string_lossy().to_string();
+        run_git(&path, &["init", "-b", "main"]).unwrap();
+        run_git(&path, &["config", "user.email", "t@t.dev"]).unwrap();
+        run_git(&path, &["config", "user.name", "Tester"]).unwrap();
+
+        std::fs::write(dir.join("a.txt"), "line1\n").unwrap();
+        run_git(&path, &["add", "a.txt"]).unwrap();
+        run_git(&path, &["commit", "-m", "first"]).unwrap();
+        let first = run_git(&path, &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+
+        std::fs::write(dir.join("a.txt"), "line1\nline2\n").unwrap();
+        run_git(&path, &["commit", "-am", "second"]).unwrap();
+
+        std::fs::write(dir.join("b.txt"), "new file\n").unwrap();
+        run_git(&path, &["add", "b.txt"]).unwrap();
+        run_git(&path, &["commit", "-am", "third"]).unwrap();
+        let third = run_git(&path, &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+
+        // first..third skips the middle commit entirely — proves this isn't
+        // limited to adjacent parent-child pairs like commit_details is.
+        let files = commit_range_files(&path, &first, &third).unwrap();
+        let mut paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["a.txt", "b.txt"]);
+        assert!(files.iter().any(|f| f.path == "a.txt" && f.status == "M"));
+        assert!(files.iter().any(|f| f.path == "b.txt" && f.status == "A"));
+
+        let diff = commit_range_file_diff(&path, &first, &third, "a.txt").unwrap();
+        assert!(diff.contains("+line2"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

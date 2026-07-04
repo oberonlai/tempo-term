@@ -3,6 +3,8 @@ import {
   computeGraphLayout,
   DEFAULT_GEOMETRY,
   edgePath,
+  firstParentRowIndex,
+  laneContinuationRowIndex,
   laneX,
   type GraphEdge,
 } from "./graphLayout";
@@ -169,5 +171,56 @@ describe("edgePath", () => {
     const path = edgePath(edge, 36);
     expect(path.startsWith("M 20 20 C")).toBe(true);
     expect(path).toContain("L 34 92");
+  });
+});
+
+describe("firstParentRowIndex", () => {
+  it("finds the row of the first parent in a simple chain", () => {
+    const commits = [commit("c", ["b"]), commit("b", ["a"]), commit("a", [])];
+    expect(firstParentRowIndex(commits, 0)).toBe(1);
+    expect(firstParentRowIndex(commits, 1)).toBe(2);
+  });
+
+  it("returns null for a root commit with no parents", () => {
+    const commits = [commit("a", [])];
+    expect(firstParentRowIndex(commits, 0)).toBeNull();
+  });
+
+  it("returns null when the first parent is not loaded in the page", () => {
+    const commits = [commit("only", ["missing-parent"])];
+    expect(firstParentRowIndex(commits, 0)).toBeNull();
+  });
+
+  it("always follows the first parent from a merge commit, not the merged-in branch", () => {
+    const commits = [commit("m", ["a", "b"]), commit("b", ["a"]), commit("a", [])];
+    expect(firstParentRowIndex(commits, 0)).toBe(2); // "a" (index 2), not "b" (index 1)
+  });
+
+  it("resolves a short-hash parent reference by prefix", () => {
+    const commits = [commit("abcdef1", ["abc"]), commit("abc", [])];
+    expect(firstParentRowIndex(commits, 0)).toBe(1);
+  });
+});
+
+describe("laneContinuationRowIndex", () => {
+  it("finds the child that continues the same lane going up", () => {
+    const commits = [commit("c", ["b"]), commit("b", ["a"]), commit("a", [])];
+    const { edges } = computeGraphLayout(commits);
+    expect(laneContinuationRowIndex(edges, 1)).toBe(0); // b's continuation is c
+    expect(laneContinuationRowIndex(edges, 2)).toBe(1); // a's continuation is b
+  });
+
+  it("returns null for the newest commit on a lane", () => {
+    const commits = [commit("c", ["b"]), commit("b", ["a"]), commit("a", [])];
+    const { edges } = computeGraphLayout(commits);
+    expect(laneContinuationRowIndex(edges, 0)).toBeNull();
+  });
+
+  it("skips the merge-in bend and finds the straight-line child at a fork", () => {
+    // m merges a and b; from a's perspective going up, the straight
+    // continuation is m (same lane), not the b->a bend.
+    const commits = [commit("m", ["a", "b"]), commit("b", ["a"]), commit("a", [])];
+    const { edges } = computeGraphLayout(commits);
+    expect(laneContinuationRowIndex(edges, 2)).toBe(0); // a -> m, straight
   });
 });

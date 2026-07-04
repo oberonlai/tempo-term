@@ -6,12 +6,17 @@ import { Tooltip } from "@/components/Tooltip";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { buildFileTree, type TreeNode } from "@/lib/fileTree";
 import { useCollapsedPaths } from "@/lib/useCollapsedPaths";
-import { gitCommitDetails, gitCommitFileDiff } from "./lib/gitGraphBridge";
+import {
+  gitCommitDetails,
+  gitCommitFileDiff,
+  gitCommitRangeFiles,
+  gitCommitRangeFileDiff,
+} from "./lib/gitGraphBridge";
 import { parseDiffLines } from "./lib/parseDiff";
 import { useVirtualRows } from "./lib/useVirtualRows";
 import { DiffView } from "./DiffView";
 import { DiffExplain } from "./DiffExplain";
-import type { CommitDetails, CommitFileChange, CommitNode, DiffLine } from "./types";
+import type { CommitDetails, CommitFileChange, DiffLine, GraphSelection } from "./types";
 
 export interface CommitDetailsLabels {
   author: string;
@@ -21,6 +26,8 @@ export interface CommitDetailsLabels {
   noDiff: string;
   noFileSelected: string;
   close: string;
+  /** Badge shown next to the header hashes while comparing two commits. */
+  compareBadge: string;
   diffTab: string;
   aiTab: string;
   aiGenerate: string;
@@ -37,7 +44,7 @@ export interface CommitDetailsLabels {
 
 interface CommitDetailsPanelProps {
   repo: string;
-  commit: CommitNode;
+  selection: GraphSelection;
   onClose: () => void;
   labels: CommitDetailsLabels;
 }
@@ -149,13 +156,26 @@ function DetailsTreeRows({
   );
 }
 
-export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDetailsPanelProps) {
+export function CommitDetailsPanel({ repo, selection, onClose, labels }: CommitDetailsPanelProps) {
+  const isCompare = selection.mode === "compare";
+  // Non-null only in single mode; used for the author/date/message block and
+  // the AI-explain tab, both of which only make sense for one commit.
+  const singleCommit = selection.mode === "single" ? selection.commit : null;
+  const rangeKey =
+    selection.mode === "single" ? selection.commit.hash : `${selection.from.hash}..${selection.to.hash}`;
+  const headerHash =
+    selection.mode === "single" ? selection.commit.hash : `${selection.from.hash} .. ${selection.to.hash}`;
   const [details, setDetails] = useState<CommitDetails | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diffLines, setDiffLines] = useState<DiffLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [diffText, setDiffText] = useState("");
   const [tab, setTab] = useState<"diff" | "ai">("diff");
+  // `tab` is state, so it can still read "ai" on the render where `selection`
+  // just flipped to compare mode (the effect that resets it to "diff" hasn't
+  // run yet). Fall back to "diff" here so the content below never tries to
+  // render the AI tab (and dereference `singleCommit`) while isCompare.
+  const activeTab = isCompare ? "diff" : tab;
   const [filesViewMode, setFilesViewMode] = useState<FilesViewMode>("flat");
   const {
     collapsed: collapsedFolders,
@@ -181,7 +201,8 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     );
   }, []);
 
-  // Load message + changed files when the commit changes; auto-open first file.
+  // Load message + changed files when the selection changes; auto-open first
+  // file. Compare mode has no single message, so `details.message` stays "".
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -189,7 +210,14 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     setSelectedFile(null);
     setDiffLines([]);
     resetCollapsedFolders();
-    gitCommitDetails(repo, commit.hash)
+    const request =
+      selection.mode === "single"
+        ? gitCommitDetails(repo, selection.commit.hash)
+        : gitCommitRangeFiles(repo, selection.from.hash, selection.to.hash).then((files) => ({
+            message: "",
+            files,
+          }));
+    request
       .then((d) => {
         if (cancelled) {
           return;
@@ -205,7 +233,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     return () => {
       cancelled = true;
     };
-  }, [repo, commit.hash, resetCollapsedFolders]);
+  }, [repo, selection, resetCollapsedFolders]);
 
   // Lazily load the selected file's diff (both parsed lines and raw text), and
   // reset to the Diff tab when the file changes.
@@ -217,7 +245,11 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
       return;
     }
     let cancelled = false;
-    gitCommitFileDiff(repo, commit.hash, selectedFile)
+    const request =
+      selection.mode === "single"
+        ? gitCommitFileDiff(repo, selection.commit.hash, selectedFile)
+        : gitCommitRangeFileDiff(repo, selection.from.hash, selection.to.hash, selectedFile);
+    request
       .then((diff) => {
         if (!cancelled) {
           setDiffText(diff);
@@ -233,7 +265,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     return () => {
       cancelled = true;
     };
-  }, [repo, commit.hash, selectedFile]);
+  }, [repo, selection, selectedFile]);
 
   // Window the changed-files list inside the left column's single scroll
   // container: the metadata/message header scrolls with it, so the list is
@@ -245,7 +277,7 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
     files.length,
     FILE_ROW_HEIGHT,
     FILE_OVERSCAN,
-    commit.hash,
+    rangeKey,
     { listRef: fileListRef },
   );
   const visibleFiles = files.slice(filesWindow.start, filesWindow.end);
@@ -253,9 +285,16 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
   return (
     <div className="flex h-full flex-col overflow-hidden bg-bg">
       <div className="flex items-center justify-between border-b border-border bg-bg-inset px-3 py-1.5">
-        <span className="select-all font-mono text-xs font-semibold text-accent">
-          {commit.hash}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="select-all font-mono text-xs font-semibold text-accent">
+            {headerHash}
+          </span>
+          {isCompare && (
+            <span className="rounded border border-accent/40 bg-accent/15 px-1.5 py-0.5 text-[11px] font-medium text-accent">
+              {labels.compareBadge}
+            </span>
+          )}
+        </div>
         <Tooltip label={labels.close}>
           <button
             type="button"
@@ -278,18 +317,22 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
           style={{ width: `${leftWidth}px` }}
           className="relative shrink-0 overflow-auto px-3 py-2"
         >
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[13px] text-fg-subtle">
-            <span>
-              {labels.author}: {commit.author}
-            </span>
-            <span>
-              {labels.date}: {commit.date}
-            </span>
-          </div>
-          {details && (
-            <pre className="mt-2 whitespace-pre-wrap font-sans text-[13px] text-fg">
-              {details.message}
-            </pre>
+          {singleCommit && (
+            <>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[13px] text-fg-subtle">
+                <span>
+                  {labels.author}: {singleCommit.author}
+                </span>
+                <span>
+                  {labels.date}: {singleCommit.date}
+                </span>
+              </div>
+              {details && (
+                <pre className="mt-2 whitespace-pre-wrap font-sans text-[13px] text-fg">
+                  {details.message}
+                </pre>
+              )}
+            </>
           )}
           <div className="mt-2 flex items-center justify-between text-[13px] font-medium text-fg-subtle">
             <span>
@@ -376,25 +419,27 @@ export function CommitDetailsPanel({ repo, commit, onClose, labels }: CommitDeta
                 >
                   {labels.diffTab}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setTab("ai")}
-                  className={`rounded px-2 py-0.5 text-[13px] ${
-                    tab === "ai"
-                      ? "bg-bg-elevated text-fg"
-                      : "text-fg-subtle hover:text-fg"
-                  }`}
-                >
-                  {labels.aiTab}
-                </button>
+                {!isCompare && (
+                  <button
+                    type="button"
+                    onClick={() => setTab("ai")}
+                    className={`rounded px-2 py-0.5 text-[13px] ${
+                      tab === "ai"
+                        ? "bg-bg-elevated text-fg"
+                        : "text-fg-subtle hover:text-fg"
+                    }`}
+                  >
+                    {labels.aiTab}
+                  </button>
+                )}
               </div>
               <div className="min-h-0 flex-1">
-                {tab === "diff" ? (
+                {activeTab === "diff" ? (
                   <DiffView lines={diffLines} emptyLabel={labels.noDiff} />
                 ) : (
                   <DiffExplain
-                    key={`${commit.hash}|${selectedFile}`}
-                    commitHash={commit.hash}
+                    key={`${singleCommit?.hash ?? ""}|${selectedFile}`}
+                    commitHash={singleCommit?.hash ?? ""}
                     file={selectedFile}
                     diffText={diffText}
                     providerId={providerId}

@@ -37,6 +37,7 @@
     "noDiff": "沒有可顯示的差異",
     "noFileSelected": "選一個檔案看差異",
     "close": "關閉",
+    "compareBadge": "比較模式",
     "diffTab": "Diff",
     "aiTab": "AI 解釋",
     "aiGenerate": "產生 AI 解釋",

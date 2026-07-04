@@ -37,6 +37,7 @@
     "noDiff": "No diff to display",
     "noFileSelected": "Select a file to see its diff",
     "close": "Close",
+    "compareBadge": "Comparing",
     "diffTab": "Diff",
     "aiTab": "AI Explain",
     "aiGenerate": "Explain this diff",

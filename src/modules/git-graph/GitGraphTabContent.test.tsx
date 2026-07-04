@@ -16,10 +16,12 @@ vi.mock("./lib/gitGraphBridge", () => ({
   gitFetch: vi.fn(),
   gitCommitDetails: vi.fn().mockResolvedValue({ message: "", files: [] }),
   gitCommitFileDiff: vi.fn().mockResolvedValue(""),
+  gitCommitRangeFiles: vi.fn().mockResolvedValue([]),
+  gitCommitRangeFileDiff: vi.fn().mockResolvedValue(""),
   gitWorktreeList: vi.fn().mockResolvedValue([]),
 }));
 
-import { gitGraphLog, gitWorktreeList } from "./lib/gitGraphBridge";
+import { gitCommitDetails, gitGraphLog, gitWorktreeList } from "./lib/gitGraphBridge";
 
 function commitList(hashes: string[], hasMore: boolean) {
   return {
@@ -254,5 +256,86 @@ describe("GitGraphTabContent worktree selector wiring", () => {
     await screen.findByText("msg aaa1111");
 
     expect(screen.queryByLabelText("Worktree")).not.toBeInTheDocument();
+  });
+});
+
+describe("GitGraphTabContent compare mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(gitWorktreeList).mockResolvedValue([]);
+    usePendingGraphSelectionStore.setState({ hash: null });
+    useWorkspaceStore.getState().setRoot("/repo");
+  });
+
+  it("shift-clicking a second commit shows the compare header, and a plain click collapses back", async () => {
+    vi.mocked(gitGraphLog).mockImplementation(async () =>
+      commitList(["aaa1111", "bbb2222"], false),
+    );
+
+    render(<GitGraphTabContent />);
+    await waitFor(() => screen.getByText("msg aaa1111"));
+
+    const rowA = screen.getByText("msg aaa1111").closest("div[class*='absolute']")!;
+    const rowB = screen.getByText("msg bbb2222").closest("div[class*='absolute']")!;
+
+    fireEvent.click(rowA);
+    fireEvent.click(rowB, { shiftKey: true });
+
+    // aaa1111 is the newer commit (index 0), bbb2222 the older one (index 1):
+    // from (older) .. to (newer).
+    await waitFor(() => expect(screen.getByText("bbb2222 .. aaa1111")).toBeInTheDocument());
+
+    fireEvent.click(rowA);
+
+    await waitFor(() => expect(screen.getAllByText("aaa1111").length).toBeGreaterThan(0));
+    expect(screen.queryByText("bbb2222 .. aaa1111")).not.toBeInTheDocument();
+  });
+
+  it("does not refetch commit details when clicking the already-selected commit again", async () => {
+    vi.mocked(gitGraphLog).mockImplementation(async () =>
+      commitList(["aaa1111", "bbb2222"], false),
+    );
+
+    render(<GitGraphTabContent />);
+    await waitFor(() => screen.getByText("msg aaa1111"));
+
+    const rowA = screen.getByText("msg aaa1111").closest("div[class*='absolute']")!;
+
+    fireEvent.click(rowA);
+    await waitFor(() => expect(gitCommitDetails).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(rowA);
+
+    // React bails out of re-rendering when a functional setState update
+    // returns the previous state by reference, so no new effect run (and
+    // no second fetch) is even scheduled — safe to assert synchronously.
+    expect(gitCommitDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to a single selection when the shift-click anchor is no longer in a freshly reloaded commit list", async () => {
+    vi.mocked(gitGraphLog)
+      .mockResolvedValueOnce(commitList(["aaa1111", "bbb2222"], false))
+      .mockResolvedValueOnce(commitList(["ccc3333", "bbb2222"], false));
+
+    render(<GitGraphTabContent />);
+    await waitFor(() => screen.getByText("msg aaa1111"));
+
+    const rowA = screen.getByText("msg aaa1111").closest("div[class*='absolute']")!;
+    fireEvent.click(rowA);
+
+    // Simulate the repo changing underneath the stale selection (e.g. a
+    // branch switch): the reload drops aaa1111 out of the list entirely.
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => screen.getByText("msg ccc3333"));
+    expect(screen.queryByText("msg aaa1111")).not.toBeInTheDocument();
+
+    const rowB = screen.getByText("msg bbb2222").closest("div[class*='absolute']")!;
+    fireEvent.click(rowB, { shiftKey: true });
+
+    // The stale anchor's index can't be found (-1), so this must collapse to
+    // a plain single selection on bbb2222 instead of an arbitrarily-ordered
+    // compare pair.
+    await waitFor(() => expect(screen.getAllByText("bbb2222").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/ \.\. /)).not.toBeInTheDocument();
   });
 });

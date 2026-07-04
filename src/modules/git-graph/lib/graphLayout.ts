@@ -176,6 +176,45 @@ export function computeGraphLayout(
   return { layouts, edges };
 }
 
+/**
+ * Row index of `commits[index]`'s first parent within the same array. Null
+ * if the commit has no parent, or its first parent isn't loaded in `commits`
+ * yet (the caller should page in more history and retry).
+ */
+export function firstParentRowIndex(
+  commits: readonly GraphLayoutCommit[],
+  index: number,
+): number | null {
+  const parentHash = commits[index]?.parents[0];
+  if (!parentHash) {
+    return null;
+  }
+  // Try exact match first.
+  let found = commits.findIndex((c) => c.hash === parentHash);
+  if (found !== -1) {
+    return found;
+  }
+  // Fall back to prefix matching.
+  found = commits.findIndex(
+    (c) => c.hash.startsWith(parentHash) || parentHash.startsWith(c.hash),
+  );
+  return found === -1 ? null : found;
+}
+
+/**
+ * Row index of the one commit whose first-parent edge continues
+ * `commits[index]`'s exact lane going up (newer) — the straight line in the
+ * graph, not a merge-in bend. Null if `commits[index]` is the newest commit
+ * on its lane.
+ */
+export function laneContinuationRowIndex(
+  edges: readonly GraphEdge[],
+  index: number,
+): number | null {
+  const edge = edges.find((e) => e.parentIndex === index && e.cx === e.px);
+  return edge ? edge.childIndex : null;
+}
+
 /** SVG path data for one edge: a straight track, or a bend into the parent lane. */
 export function edgePath(edge: GraphEdge, rowHeight: number): string {
   const { cx, cy, px, py } = edge;

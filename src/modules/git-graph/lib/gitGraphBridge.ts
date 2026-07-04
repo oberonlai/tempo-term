@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Branch, CommitDetails, GraphLog, GraphOptions } from "../types";
+import type { Branch, CommitDetails, CommitFileChange, GraphLog, GraphOptions } from "../types";
 
 /** Read the commit DAG for the graph view, filtered by display options. */
 export function gitGraphLog(
@@ -119,6 +119,25 @@ export function gitCommitFileDiff(
   file: string,
 ): Promise<string> {
   return invoke<string>("git_commit_file_diff", { repoPath, commit, file });
+}
+
+/** Read the file list changed between two arbitrary commits (name-status). */
+export function gitCommitRangeFiles(
+  repoPath: string,
+  from: string,
+  to: string,
+): Promise<CommitFileChange[]> {
+  return invoke<CommitFileChange[]>("git_commit_range_files", { repoPath, from, to });
+}
+
+/** Read a single file's diff between two arbitrary commits. */
+export function gitCommitRangeFileDiff(
+  repoPath: string,
+  from: string,
+  to: string,
+  file: string,
+): Promise<string> {
+  return invoke<string>("git_commit_range_file_diff", { repoPath, from, to, file });
 }
 
 /** One worktree of the repository, from `git worktree list`. */

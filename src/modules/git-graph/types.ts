@@ -15,6 +15,15 @@ export interface CommitNode {
   refs: CommitRef[];
 }
 
+/**
+ * What the Git Graph commit list currently has selected: one commit, or two
+ * commits being compared. `from`/`to` are ordered older/newer by list
+ * position, not by click order.
+ */
+export type GraphSelection =
+  | { mode: "single"; commit: CommitNode }
+  | { mode: "compare"; from: CommitNode; to: CommitNode };
+
 /** A page of graph commits plus whether more history exists past `commits`. */
 export interface GraphLog {
   commits: CommitNode[];
