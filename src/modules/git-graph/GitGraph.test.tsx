@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GitGraph } from "./GitGraph";
 import { usePendingGraphSelectionStore } from "./lib/pendingGraphSelectionStore";
@@ -46,6 +46,21 @@ describe("GitGraph row click area", () => {
     const row = screen.getByText("feat: x").closest("div[class*='absolute']");
     fireEvent.click(row!, { shiftKey: true });
     expect(onSelect).toHaveBeenCalledWith(COMMIT, { shiftKey: true });
+  });
+
+  it("blocks the browser's native text-selection drag on a shift-mousedown, but not a plain one", () => {
+    render(
+      <GitGraph commits={[COMMIT]} selection={null} onSelectCommit={vi.fn()} labels={LABELS} />,
+    );
+    const row = screen.getByText("feat: x").closest("div[class*='absolute']")!;
+
+    const shiftMouseDown = createEvent.mouseDown(row, { shiftKey: true });
+    fireEvent(row, shiftMouseDown);
+    expect(shiftMouseDown.defaultPrevented).toBe(true);
+
+    const plainMouseDown = createEvent.mouseDown(row, { shiftKey: false });
+    fireEvent(row, plainMouseDown);
+    expect(plainMouseDown.defaultPrevented).toBe(false);
   });
 });
 

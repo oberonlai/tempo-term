@@ -94,6 +94,17 @@ export function GitGraph({
     onSelectCommit(commit, { shiftKey: event.shiftKey });
   }
 
+  // Without this, holding Shift while clicking asks the browser to extend a
+  // native text selection from the last click point across every row in
+  // between (the hash spans are selectable text) instead of firing a plain
+  // click on this row — the compare pair never gets set, and it visibly
+  // highlights text the user never meant to select.
+  function preventShiftClickTextSelection(event: React.MouseEvent) {
+    if (event.shiftKey) {
+      event.preventDefault();
+    }
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (commits.length === 0 || !activeHash) {
       return;
@@ -260,6 +271,7 @@ export function GitGraph({
                 <Tooltip key={commit.hash} label={commit.hash}>
                   <button
                     type="button"
+                    onMouseDown={preventShiftClickTextSelection}
                     onClick={(e) => selectFromClick(commit, e)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -313,6 +325,7 @@ export function GitGraph({
               return (
                 <div
                   key={commit.hash}
+                  onMouseDown={preventShiftClickTextSelection}
                   onClick={(e) => selectFromClick(commit, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
