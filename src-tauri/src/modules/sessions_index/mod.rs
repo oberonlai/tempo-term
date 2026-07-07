@@ -6,9 +6,11 @@
 pub mod antigravity;
 pub mod claude;
 pub mod codex;
+pub mod export;
 pub mod index;
 pub mod proto;
 pub mod scanner;
+pub mod stats;
 pub mod sync;
 pub mod types;
 pub mod watch;
@@ -19,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
 
 use index::Index;
+use stats::SessionsStats;
 use types::{SessionSummary, TranscriptMessage};
 
 /// The index's on-disk file, under the app's data directory.
@@ -156,6 +159,41 @@ pub async fn sessions_get(state: State<'_, SessionsIndexState>, id: String) -> R
     result
 }
 
+/// Re-parses a session's transcript (same lookup + parse as `sessions_get`)
+/// and renders it as a standalone Markdown string for the export button.
+/// The frontend then hands this to a save dialog and writes it to disk —
+/// this command only produces the content.
+#[tauri::command]
+pub async fn sessions_export(state: State<'_, SessionsIndexState>, id: String) -> Result<String, String> {
+    let index = {
+        let guard = state.inner.lock().unwrap();
+        let inner = guard.as_ref().ok_or_else(|| "sessions index not started".to_string())?;
+        Arc::clone(&inner.index)
+    };
+
+    // Lookup, parse, and render all run on a blocking-pool thread: the
+    // lookup so this async worker never parks on the index mutex during a
+    // background sync batch, and the parse for the same reason as
+    // `sessions_get` (a transcript can be multiple MBs).
+    tauri::async_runtime::spawn_blocking(move || {
+        let summary = index
+            .lock()
+            .unwrap()
+            .lookup_summary(&id)
+            .ok_or_else(|| format!("session {id} not found"))?;
+        let path = Path::new(&summary.file_path);
+        let messages = match summary.agent.as_str() {
+            "claude" => claude::parse_claude_transcript(path),
+            "codex" => codex::parse_codex_transcript(path),
+            "antigravity" => antigravity::parse_antigravity_transcript(path),
+            _ => Vec::new(),
+        };
+        Ok(export::transcript_to_markdown(&summary, &messages))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Pin or unpin a session. Errors if the index hasn't been started yet.
 #[tauri::command]
 pub fn sessions_pin(state: State<SessionsIndexState>, id: String, pinned: bool) -> Result<(), String> {
@@ -163,4 +201,145 @@ pub fn sessions_pin(state: State<SessionsIndexState>, id: String, pinned: bool) 
     let inner = guard.as_ref().ok_or_else(|| "sessions index not started".to_string())?;
     let result = inner.index.lock().unwrap().set_pinned(&id, pinned);
     result
+}
+
+/// Move a path to the OS trash. Thin, deliberately-untested wrapper around
+/// the `trash` crate, kept as its own function for the same reason as
+/// `fs::ops::delete`: the real OS Trash API is not something a unit test
+/// should exercise, so the pure logic around it (`sync::companion_paths`,
+/// `Index::delete_session`) is tested instead and this stays a one-liner.
+fn move_to_trash(path: &Path) -> Result<(), String> {
+    trash::delete(path).map_err(|e| e.to_string())
+}
+
+/// Move a session's source file and its existing companions to the OS trash.
+/// A source file that is already gone is a success, not an error — the row
+/// is stale (the file was deleted externally) and the caller should still
+/// clean up the index. The main file failing to trash is a hard error; a
+/// companion failing is logged unconditionally (it's the only path where
+/// data can be quietly orphaned) but never blocks removing the session.
+fn trash_session_files(agent: &str, path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    move_to_trash(path)?;
+    for companion in sync::companion_paths(agent, path) {
+        if companion.exists() {
+            if let Err(err) = move_to_trash(&companion) {
+                eprintln!("sessions_index: failed to trash companion {}: {err}", companion.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Move a session's source file and its companions (a sibling
+/// subagents/tool-results directory for Claude, `-wal`/`-shm` for
+/// Antigravity) to the OS trash, then drop the session from the index and
+/// emit `sessions-index:updated`. Never permanently deletes anything — trash
+/// moves are always recoverable — and a missing companion (or an
+/// already-missing source file) is skipped silently rather than treated as
+/// an error.
+#[tauri::command]
+pub async fn sessions_delete(app: AppHandle, state: State<'_, SessionsIndexState>, id: String) -> Result<(), String> {
+    let index = {
+        let guard = state.inner.lock().unwrap();
+        let inner = guard.as_ref().ok_or_else(|| "sessions index not started".to_string())?;
+        Arc::clone(&inner.index)
+    };
+
+    // A single indexed SELECT, unlike sessions_get's full transcript parse,
+    // so it's cheap enough to take the lock synchronously here rather than
+    // on the blocking pool.
+    let lookup = index.lock().unwrap().lookup_file(&id);
+    let Some((agent, file_path)) = lookup else {
+        return Err(format!("session {id} not found"));
+    };
+
+    // The trash calls can block on IPC to Finder (macOS) or the desktop
+    // shell, so they run on a blocking-pool thread rather than the async
+    // runtime's own worker threads.
+    let trashed = tauri::async_runtime::spawn_blocking(move || {
+        trash_session_files(&agent, Path::new(&file_path))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    trashed?;
+
+    index.lock().unwrap().delete_session(&id)?;
+    watch::emit_updated(&app, 1);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A source file that is already gone (deleted externally, or a stale
+    /// index row) counts as success: nothing to trash, but the caller should
+    /// still drop the index row instead of erroring out and leaving the
+    /// phantom session in the list. This test never touches the real OS
+    /// trash — the path doesn't exist, so no trash call is ever made.
+    #[test]
+    fn trash_session_files_with_a_missing_source_file_is_a_success() {
+        let path = std::env::temp_dir()
+            .join(format!("tt-sessions-delete-missing-{}", std::process::id()))
+            .join("gone.jsonl");
+        assert!(trash_session_files("claude", &path).is_ok());
+    }
+
+    /// The command flow for a stale row, minus the Tauri plumbing: a session
+    /// whose file no longer exists still gets its index rows removed.
+    #[test]
+    fn deleting_a_session_whose_file_is_gone_still_removes_the_row() {
+        use crate::modules::sessions_index::types::ParsedSession;
+
+        let dir = std::env::temp_dir().join(format!("tt-sessions-delete-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = Index::open(&dir.join("index.db")).unwrap();
+        let missing = dir.join("never-created.jsonl");
+        let session = ParsedSession {
+            id: "stale".into(),
+            agent: "claude",
+            project_cwd: "/p".into(),
+            title: "t".into(),
+            started_at: 0,
+            ended_at: 0,
+            message_count: 1,
+            user_message_count: 1,
+            output_tokens: None,
+            model: None,
+            activity: Vec::new(),
+        };
+        index.upsert_session(&session, &missing.to_string_lossy(), 1, 1).unwrap();
+
+        assert!(trash_session_files("claude", &missing).is_ok());
+        index.delete_session("stale").unwrap();
+
+        assert!(index.list().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Dashboard aggregates (cards, heatmap, top sessions, weekly breakdown) for
+/// sessions active in the last `days` local days (`None` = all time).
+///
+/// Async and offloaded to a blocking pool thread for the same reason as
+/// `sessions_list`: several SQL aggregates run here, and none of them should
+/// ever block the main thread on incidental lock contention with a
+/// background sync. Degrades to zeroed stats — never an error — before
+/// `sessions_index_start` has run.
+#[tauri::command]
+pub async fn sessions_stats(state: State<'_, SessionsIndexState>, days: Option<i64>) -> Result<SessionsStats, String> {
+    let index = {
+        let guard = state.inner.lock().unwrap();
+        guard.as_ref().map(|inner| Arc::clone(&inner.index))
+    };
+    let Some(index) = index else {
+        return Ok(stats::empty_stats());
+    };
+    tauri::async_runtime::spawn_blocking(move || index.lock().unwrap().stats(days))
+        .await
+        .map_err(|e| e.to_string())
 }

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionsPanel } from "./SessionsPanel";
 import { useSessionsStore } from "./lib/sessionsStore";
@@ -9,7 +9,7 @@ import { leaf } from "@/modules/terminal/lib/terminalLayout";
 
 // vi.mock is hoisted to the top of the file, so mocks must be created with
 // vi.hoisted() to be accessible inside the factory callbacks.
-const { mockInvoke, mockListen, mockUnlisten, sessionsFixture } = vi.hoisted(() => ({
+const { mockInvoke, mockListen, mockUnlisten, sessionsFixture, deleteFailure } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   mockListen: vi.fn(),
   mockUnlisten: vi.fn(),
@@ -17,13 +17,25 @@ const { mockInvoke, mockListen, mockUnlisten, sessionsFixture } = vi.hoisted(() 
   // test seeds into the store, so the panel's own on-mount refresh resolves
   // to the same fixture instead of clobbering it with stale/empty data.
   sessionsFixture: { current: [] as SessionSummary[] },
+  // When set, "sessions_delete" rejects — for the failure-surfacing tests.
+  deleteFailure: { current: false },
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (cmd: string) => {
-    mockInvoke(cmd);
+  invoke: (cmd: string, args?: unknown) => {
+    // Only forward a second argument when the call actually passed one, so
+    // existing `toHaveBeenCalledWith(cmd)` assertions (no args) still match
+    // an exact single-argument call.
+    if (args === undefined) {
+      mockInvoke(cmd);
+    } else {
+      mockInvoke(cmd, args);
+    }
     if (cmd === "sessions_list") {
       return Promise.resolve(sessionsFixture.current);
+    }
+    if (cmd === "sessions_delete" && deleteFailure.current) {
+      return Promise.reject(new Error("trash failed"));
     }
     return Promise.resolve(undefined);
   },
@@ -80,6 +92,7 @@ describe("SessionsPanel", () => {
     mockListen.mockReset().mockResolvedValue(mockUnlisten);
     mockUnlisten.mockReset();
     sessionsFixture.current = [];
+    deleteFailure.current = false;
     useSessionsStore.setState({
       sessions: [],
       loaded: false,
@@ -203,6 +216,18 @@ describe("SessionsPanel", () => {
     expect(useTabsStore.getState().activeId).toBe(tabId);
   });
 
+  it("opens the dashboard tab (no session selected) via the header button", async () => {
+    seedSessions([session({ id: "a", title: "Deploy script" })]);
+    await renderSettled();
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.open" }));
+
+    // A sessions tab opens with nothing selected, so it shows the dashboard.
+    expect(useTabsStore.getState().tabs).toHaveLength(1);
+    expect(useTabsStore.getState().tabs[0].kind).toBe("sessions");
+    expect(useSessionsStore.getState().selectedId).toBe(null);
+  });
+
   it("toggles pin via the row's pin button without selecting the row", async () => {
     seedSessions([session({ id: "a", title: "Deploy script", pinned: false })]);
     await renderSettled();
@@ -278,6 +303,113 @@ describe("SessionsPanel", () => {
 
     expect(useTabsStore.getState().activeId).toBe("tab-1");
     expect(useTabsStore.getState().tabs[0].activeLeafId).toBe("leaf-1");
+  });
+
+  it("opens a confirm dialog from the row's delete button instead of deleting immediately", async () => {
+    seedSessions([session({ id: "a", title: "Deploy script" })]);
+    await renderSettled();
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("sessions.deleteConfirm")).toBeInTheDocument();
+    expect(mockInvoke).not.toHaveBeenCalledWith("sessions_delete", expect.anything());
+  });
+
+  it("does nothing when the row's delete confirmation is cancelled", async () => {
+    seedSessions([session({ id: "a", title: "Deploy script" })]);
+    await renderSettled();
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "actions.cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockInvoke).not.toHaveBeenCalledWith("sessions_delete", expect.anything());
+  });
+
+  it("deletes the session and clears the selection when it was selected, on confirm", async () => {
+    seedSessions([session({ id: "a", title: "Deploy script" })]);
+    await renderSettled();
+    act(() => {
+      useSessionsStore.setState({ selectedId: "a" });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "sessions.delete" }));
+      // Flush the microtask queue past `sessionsDelete`'s own `await` inside
+      // `handleDelete`, so the resulting `select(null)` state update lands
+      // inside this `act` scope instead of after it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("sessions_delete", { id: "a" });
+    expect(useSessionsStore.getState().selectedId).toBe(null);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("leaves the selection untouched when the deleted session was not selected", async () => {
+    seedSessions([
+      session({ id: "a", title: "Deploy script" }),
+      session({ id: "b", title: "Other session" }),
+    ]);
+    await renderSettled();
+    act(() => {
+      useSessionsStore.setState({ selectedId: "b" });
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "sessions.delete" })[0]);
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "sessions.delete" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("sessions_delete", { id: "a" });
+    expect(useSessionsStore.getState().selectedId).toBe("b");
+  });
+
+  it("shows an error line and keeps the row and selection when the delete fails", async () => {
+    seedSessions([session({ id: "a", title: "Deploy script" })]);
+    await renderSettled();
+    act(() => {
+      useSessionsStore.setState({ selectedId: "a" });
+    });
+    deleteFailure.current = true;
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "sessions.delete" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The failure is surfaced, and nothing else changed: the row is still
+    // listed and the selection was not cleared.
+    expect(screen.getByText("sessions.deleteError")).toBeInTheDocument();
+    expect(screen.getByText("Deploy script")).toBeInTheDocument();
+    expect(useSessionsStore.getState().selectedId).toBe("a");
+  });
+
+  it("clears the delete error line when a new delete attempt starts", async () => {
+    seedSessions([session({ id: "a", title: "Deploy script" })]);
+    await renderSettled();
+    deleteFailure.current = true;
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "sessions.delete" }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("sessions.deleteError")).toBeInTheDocument();
+
+    // Re-opening the confirm dialog starts a fresh attempt: stale error gone.
+    fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
+
+    expect(screen.queryByText("sessions.deleteError")).not.toBeInTheDocument();
   });
 
   it("releases the listener when unmounted before the subscription resolves", async () => {
