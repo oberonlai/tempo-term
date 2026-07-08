@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use wait_timeout::ChildExt;
 
@@ -236,33 +236,19 @@ fn gh_available_uncached() -> bool {
         .unwrap_or(false)
 }
 
-/// Cache for the `gh --version` probe. `gh_available` is called before every PR
-/// refresh, so a workspace with N cards would otherwise fork `gh` N times on
-/// each focus. gh being (un)installed mid-session is rare, so a short TTL is
-/// plenty and still notices a fresh install within a few minutes.
-static GH_AVAILABLE_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
-const GH_AVAILABLE_TTL: Duration = Duration::from_secs(300);
+/// Cached once per session with `OnceLock::get_or_init`, which runs the probe
+/// exactly once even under a concurrent burst of workspace cards (no thundering
+/// herd). gh being (un)installed mid-session is rare enough that a session-
+/// lifetime cache is fine, and a missing gh falls back to the REST-API path.
+static GH_AVAILABLE_CACHE: OnceLock<bool> = OnceLock::new();
 
 /// Whether the `gh` CLI is available. Async so the subprocess probe runs off the
 /// main GUI thread, and cached so a burst of cards doesn't refork `gh` per card.
 #[tauri::command]
 pub async fn gh_available() -> bool {
-    tauri::async_runtime::spawn_blocking(|| {
-        if let Ok(guard) = GH_AVAILABLE_CACHE.lock() {
-            if let Some((at, val)) = *guard {
-                if at.elapsed() < GH_AVAILABLE_TTL {
-                    return val;
-                }
-            }
-        }
-        let val = gh_available_uncached();
-        if let Ok(mut guard) = GH_AVAILABLE_CACHE.lock() {
-            *guard = Some((Instant::now(), val));
-        }
-        val
-    })
-    .await
-    .unwrap_or(false)
+    tauri::async_runtime::spawn_blocking(|| *GH_AVAILABLE_CACHE.get_or_init(gh_available_uncached))
+        .await
+        .unwrap_or(false)
 }
 
 /// The PR for `branch` via the `gh` CLI, run inside `cwd`. None when gh reports
