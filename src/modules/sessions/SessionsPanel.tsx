@@ -1,11 +1,14 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { History, Pin, PinOff, Play, Search } from "lucide-react";
+import { History, LayoutDashboard, Pin, PinOff, Play, Search, Trash2 } from "lucide-react";
 import { Tooltip } from "@/components/Tooltip";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Combobox } from "@/components/Combobox";
 import { useTabsStore } from "@/stores/tabsStore";
 import { useSessionStatusStore } from "@/modules/claude-progress/lib/sessionStatusStore";
 import { onSessionsUpdated, type SessionAgent, type SessionSummary } from "./lib/sessionsBridge";
 import { useSessionsStore, visibleSessions } from "./lib/sessionsStore";
+import { sessionsDelete } from "./lib/statsBridge";
 import { formatRelativeTime } from "./lib/relativeTime";
 import { deriveLiveSessions, type LiveSession } from "./lib/liveSessions";
 import { AGENT_BADGE_CLASS, agentBadgeClass } from "./lib/agentBadge";
@@ -103,75 +106,167 @@ interface SessionRowProps {
 function SessionRow({ session, selected }: SessionRowProps) {
   const { t } = useTranslation();
   const select = useSessionsStore((s) => s.select);
+  const selectProject = useSessionsStore((s) => s.selectProject);
   const togglePin = useSessionsStore((s) => s.togglePin);
   const openSessionsTab = useTabsStore((s) => s.openSessionsTab);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Delete is destructive (even if recoverable from the Trash), so a failure
+  // must never pass silently: this renders an error line under the row until
+  // the next delete attempt replaces it.
+  const [deleteError, setDeleteError] = useState(false);
   const pinLabel = t(session.pinned ? "sessions.unpin" : "sessions.pin");
   const resumeLabel = t("sessions.resume");
+  const deleteLabel = t("sessions.delete");
   // Rows have no room to explain an unsupported agent, so the button is
   // hidden outright here — the viewer header shows it disabled-with-tooltip
   // instead, since there's space there for the explanation.
   const canResume = resumeCommand(session.agent, session.id) !== null;
 
+  // Trashing is recoverable (never a permanent delete), but it still touches
+  // real files on disk, so it goes through the shared ConfirmDialog rather
+  // than firing on click like pin/resume do.
+  async function handleDelete() {
+    setConfirmingDelete(false);
+    try {
+      await sessionsDelete(session.id);
+    } catch {
+      setDeleteError(true);
+      return;
+    }
+    if (selected) {
+      select(null);
+    }
+  }
+
   return (
-    <li className="group flex items-center">
-      <button
-        type="button"
-        aria-current={selected ? "true" : undefined}
-        onClick={() => {
-          select(session.id);
-          openSessionsTab();
-        }}
-        className={`flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left ${
-          selected ? "bg-bg-elevated" : "hover:bg-bg-elevated"
-        }`}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate text-sm text-fg-muted group-hover:text-fg">
-              {session.title}
-            </span>
-            <span
-              className={`shrink-0 text-[10px] font-medium uppercase ${AGENT_BADGE_CLASS[session.agent]}`}
-            >
-              {t(`sessions.agents.${session.agent}`)}
-            </span>
+    <li className="group">
+      <div className="flex items-center">
+        <button
+          type="button"
+          aria-current={selected ? "true" : undefined}
+          onClick={() => {
+            select(session.id);
+            openSessionsTab();
+          }}
+          className={`flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left ${
+            selected ? "bg-bg-elevated" : "hover:bg-bg-elevated"
+          }`}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="min-w-0 truncate text-sm text-fg-muted group-hover:text-fg">
+                {session.title}
+              </span>
+              <span
+                className={`shrink-0 text-[10px] font-medium uppercase ${AGENT_BADGE_CLASS[session.agent]}`}
+              >
+                {t(`sessions.agents.${session.agent}`)}
+              </span>
+            </div>
+            <div className="truncate text-xs text-fg-subtle">
+              {/* Nested inside the row's own select-session button, so a click
+                  here must stop propagation or it would also select the
+                  session; role="button" + a keydown handler keep it reachable
+                  from the keyboard despite not being a real <button> (which
+                  can't nest inside another button). An empty cwd has nothing
+                  to route to (selectProject("") would fall through to the
+                  dashboard), so it's skipped entirely rather than rendered as
+                  a no-op link. */}
+              {session.project_cwd && (
+                <>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (session.project_cwd) {
+                        selectProject(session.project_cwd);
+                        openSessionsTab();
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (session.project_cwd) {
+                          selectProject(session.project_cwd);
+                          openSessionsTab();
+                        }
+                      }
+                    }}
+                    className="hover:text-fg hover:underline"
+                  >
+                    {basename(session.project_cwd)}
+                  </span>{" "}
+                  ·{" "}
+                </>
+              )}
+              {formatRelativeTime(session.ended_at, t)} ·{" "}
+              {t("sessions.messages", { count: session.message_count })}
+            </div>
           </div>
-          <div className="truncate text-xs text-fg-subtle">
-            {basename(session.project_cwd)} · {formatRelativeTime(session.ended_at, t)} ·{" "}
-            {t("sessions.messages", { count: session.message_count })}
-          </div>
-        </div>
-      </button>
-      <div className="flex shrink-0 items-center opacity-0 pr-2 group-hover:opacity-100">
-        {canResume && (
-          <Tooltip label={resumeLabel}>
+        </button>
+        <div className="flex shrink-0 items-center opacity-0 pr-2 group-hover:opacity-100">
+          {canResume && (
+            <Tooltip label={resumeLabel}>
+              <button
+                type="button"
+                aria-label={resumeLabel}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resumeSession(session);
+                }}
+                className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
+              >
+                <Play size={13} />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip label={pinLabel}>
             <button
               type="button"
-              aria-label={resumeLabel}
+              aria-label={pinLabel}
               onClick={(e) => {
                 e.stopPropagation();
-                resumeSession(session);
+                void togglePin(session.id);
               }}
               className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
             >
-              <Play size={13} />
+              {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
             </button>
           </Tooltip>
-        )}
-        <Tooltip label={pinLabel}>
-          <button
-            type="button"
-            aria-label={pinLabel}
-            onClick={(e) => {
-              e.stopPropagation();
-              void togglePin(session.id);
-            }}
-            className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-fg"
-          >
-            {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
-          </button>
-        </Tooltip>
+          <Tooltip label={deleteLabel}>
+            <button
+              type="button"
+              aria-label={deleteLabel}
+              onClick={(e) => {
+                e.stopPropagation();
+                // A fresh attempt supersedes any stale error from the last one.
+                setDeleteError(false);
+                setConfirmingDelete(true);
+              }}
+              className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-danger"
+            >
+              <Trash2 size={13} />
+            </button>
+          </Tooltip>
+        </div>
       </div>
+
+      {deleteError && (
+        <p className="px-3 pb-1 text-xs text-danger/80">{t("sessions.deleteError")}</p>
+      )}
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title={deleteLabel}
+          message={t("sessions.deleteConfirm")}
+          confirmLabel={deleteLabel}
+          cancelLabel={t("actions.cancel")}
+          onConfirm={() => void handleDelete()}
+          onCancel={() => setConfirmingDelete(false)}
+        />
+      )}
     </li>
   );
 }
@@ -182,9 +277,13 @@ export function SessionsPanel() {
   const loaded = useSessionsStore((s) => s.loaded);
   const query = useSessionsStore((s) => s.query);
   const agentFilter = useSessionsStore((s) => s.agentFilter);
+  const modelFilter = useSessionsStore((s) => s.modelFilter);
   const selectedId = useSessionsStore((s) => s.selectedId);
   const setQuery = useSessionsStore((s) => s.setQuery);
   const setAgentFilter = useSessionsStore((s) => s.setAgentFilter);
+  const setModelFilter = useSessionsStore((s) => s.setModelFilter);
+  const select = useSessionsStore((s) => s.select);
+  const openSessionsTab = useTabsStore((s) => s.openSessionsTab);
 
   useEffect(() => {
     void useSessionsStore.getState().start();
@@ -211,15 +310,59 @@ export function SessionsPanel() {
     };
   }, []);
 
-  const { pinned, history } = visibleSessions(sessions, query, agentFilter);
+  // Distinct non-null models seen across the loaded sessions, "all" first.
+  // The dropdown is only worth showing once there's actually a choice to make.
+  const modelOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) if (s.model) set.add(s.model);
+    return ["all", ...[...set].sort()];
+  }, [sessions]);
+
+  // A selected model can drop out of the option list (its only session got
+  // deleted or a refresh reshuffled the data). Once that happens the dropdown
+  // that would let the user pick "all" again is hidden too (see the
+  // `modelOptions.length > 1` gate below), so the list would otherwise be
+  // stranded empty with no on-screen way back. Reset instead of leaving it
+  // dangling.
+  useEffect(() => {
+    if (modelFilter !== "all" && !modelOptions.includes(modelFilter)) {
+      setModelFilter("all");
+    }
+  }, [modelOptions, modelFilter, setModelFilter]);
+
+  // Combobox takes a flat string list where the option string doubles as its
+  // own label (see GitGraphToolbar's branch picker for the same pattern), so
+  // "all" is displayed as its translated label and mapped back on change.
+  const modelFilterAllLabel = t("sessions.modelFilterAll");
+  const modelComboboxOptions = modelOptions.map((m) => (m === "all" ? modelFilterAllLabel : m));
+  const modelComboboxValue = modelFilter === "all" ? modelFilterAllLabel : modelFilter;
+
+  const { pinned, history } = visibleSessions(sessions, query, agentFilter, modelFilter);
   const isEmpty = pinned.length === 0 && history.length === 0;
 
   return (
     <div className="flex h-full flex-col bg-bg-inset">
-      <div className="flex h-9 shrink-0 items-center border-b border-border px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
           {t("nav.sessions")}
         </span>
+        {/* Opens the sessions tab with nothing selected, i.e. the dashboard.
+            Selecting a row also opens that tab but on the transcript viewer;
+            this is the only way to reach the dashboard as the home screen.
+            Shown as a labelled icon (not a hover-only tooltip) so it's a
+            discoverable button. */}
+        <button
+          type="button"
+          aria-label={t("sessions.dashboard.open")}
+          onClick={() => {
+            select(null);
+            openSessionsTab();
+          }}
+          className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-fg-subtle hover:bg-bg-elevated hover:text-fg"
+        >
+          <LayoutDashboard size={13} />
+          {t("sessions.dashboard.open")}
+        </button>
       </div>
 
       <div className="shrink-0 border-b border-border px-3 py-2">
@@ -247,6 +390,16 @@ export function SessionsPanel() {
               {key === "all" ? t("sessions.all") : t(`sessions.agents.${key}`)}
             </button>
           ))}
+          {modelOptions.length > 1 && (
+            <Combobox
+              value={modelComboboxValue}
+              options={modelComboboxOptions}
+              onChange={(v) => setModelFilter(v === modelFilterAllLabel ? "all" : v)}
+              ariaLabel={t("sessions.modelFilterLabel")}
+              size="sm"
+              className="ml-auto w-32"
+            />
+          )}
         </div>
       </div>
 
