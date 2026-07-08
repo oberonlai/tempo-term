@@ -200,7 +200,7 @@ pub fn spawn_with_sinks(
                     break;
                 }
                 match rx.recv_timeout(remaining) {
-                    Ok(chunk) => acc.extend_from_slice(&chunk),
+                    Ok(chunk) => acc.extend(chunk),
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(RecvTimeoutError::Disconnected) => {
                         // Reader finished mid-window: flush what we have, then stop.
@@ -210,10 +210,15 @@ pub fn spawn_with_sinks(
                 }
             }
             if !on_bytes(acc) {
-                break; // Sink asked to stop; dropping `rx` unblocks the reader.
+                break; // Sink asked to stop.
             }
         }
 
+        // Drop the receiver BEFORE joining. If the reader is blocked on a full
+        // channel `tx.send`, closing `rx` makes that send return an error so the
+        // reader loop exits; otherwise `join()` — and thus `child.wait()` /
+        // `on_exit` — would deadlock and leak both threads.
+        drop(rx);
         let _ = reader_thread.join();
         let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
         on_exit(code);
