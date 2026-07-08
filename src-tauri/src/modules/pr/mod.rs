@@ -5,7 +5,8 @@
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use wait_timeout::ChildExt;
 
@@ -223,9 +224,8 @@ fn run_gh(mut command: Command) -> Option<std::process::Output> {
     }
 }
 
-/// Whether the `gh` CLI is available.
-#[tauri::command]
-pub fn gh_available() -> bool {
+/// Blocking probe: spawn `gh --version` and check it succeeds.
+fn gh_available_uncached() -> bool {
     let Some(gh) = find_gh() else {
         return false;
     };
@@ -236,10 +236,48 @@ pub fn gh_available() -> bool {
         .unwrap_or(false)
 }
 
-/// The PR for `branch` via the `gh` CLI, run inside `cwd`. None when gh reports
-/// no PR (a non-zero exit) or gh is missing.
+/// Cache for the `gh --version` probe. `gh_available` is called before every PR
+/// refresh, so a workspace with N cards would otherwise fork `gh` N times on
+/// each focus. gh being (un)installed mid-session is rare, so a short TTL is
+/// plenty and still notices a fresh install within a few minutes.
+static GH_AVAILABLE_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+const GH_AVAILABLE_TTL: Duration = Duration::from_secs(300);
+
+/// Whether the `gh` CLI is available. Async so the subprocess probe runs off the
+/// main GUI thread, and cached so a burst of cards doesn't refork `gh` per card.
 #[tauri::command]
-pub fn pr_via_gh(cwd: String, branch: Option<String>) -> Result<Option<PrInfo>, String> {
+pub async fn gh_available() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Ok(guard) = GH_AVAILABLE_CACHE.lock() {
+            if let Some((at, val)) = *guard {
+                if at.elapsed() < GH_AVAILABLE_TTL {
+                    return val;
+                }
+            }
+        }
+        let val = gh_available_uncached();
+        if let Ok(mut guard) = GH_AVAILABLE_CACHE.lock() {
+            *guard = Some((Instant::now(), val));
+        }
+        val
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// The PR for `branch` via the `gh` CLI, run inside `cwd`. None when gh reports
+/// no PR (a non-zero exit) or gh is missing. Async + spawn_blocking so the
+/// `gh pr view` spawn (a subprocess that also hits the GitHub API) never runs on
+/// the main GUI thread: the workspace panel fans this out across every card on
+/// focus, and a burst of synchronous spawns here froze the whole UI for seconds.
+#[tauri::command]
+pub async fn pr_via_gh(cwd: String, branch: Option<String>) -> Result<Option<PrInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || pr_via_gh_blocking(cwd, branch))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn pr_via_gh_blocking(cwd: String, branch: Option<String>) -> Result<Option<PrInfo>, String> {
     let mut args: Vec<&str> = vec!["pr", "view"];
     let branch = branch.unwrap_or_default();
     if !branch.is_empty() {
@@ -352,7 +390,7 @@ mod tests {
     #[test]
     fn pr_via_gh_refuses_a_flag_like_branch() {
         // A branch starting with '-' must not reach gh as a positional arg.
-        assert_eq!(pr_via_gh(".".into(), Some("-x".into())), Ok(None));
+        assert_eq!(pr_via_gh_blocking(".".into(), Some("-x".into())), Ok(None));
     }
 
     #[test]
