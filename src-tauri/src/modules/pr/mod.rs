@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use wait_timeout::ChildExt;
@@ -236,19 +236,40 @@ fn gh_available_uncached() -> bool {
         .unwrap_or(false)
 }
 
-/// Cached once per session with `OnceLock::get_or_init`, which runs the probe
-/// exactly once even under a concurrent burst of workspace cards (no thundering
-/// herd). gh being (un)installed mid-session is rare enough that a session-
-/// lifetime cache is fine, and a missing gh falls back to the REST-API path.
-static GH_AVAILABLE_CACHE: OnceLock<bool> = OnceLock::new();
+/// Sticky cache for a POSITIVE `gh` probe only. `gh_available` runs before every
+/// PR refresh, so a workspace with N cards would otherwise fork `gh` N times per
+/// focus. A negative result is deliberately NOT cached: the first probe can be a
+/// transient false-negative (a cold-start `gh --version` timeout, or `find_gh`
+/// not yet resolved), and caching that would silently disable gh for the whole
+/// session — every card — until restart. Not caching false lets it self-heal on
+/// the next call. `false` here means "no positive confirmed yet".
+static GH_AVAILABLE: Mutex<bool> = Mutex::new(false);
 
 /// Whether the `gh` CLI is available. Async so the subprocess probe runs off the
-/// main GUI thread, and cached so a burst of cards doesn't refork `gh` per card.
+/// main GUI thread; the positive result is cached (single-flight) so a burst of
+/// cards shares one probe, while a negative result re-probes so a transient miss
+/// recovers on its own.
 #[tauri::command]
 pub async fn gh_available() -> bool {
-    tauri::async_runtime::spawn_blocking(|| *GH_AVAILABLE_CACHE.get_or_init(gh_available_uncached))
+    tauri::async_runtime::spawn_blocking(|| gh_available_via(&GH_AVAILABLE, gh_available_uncached))
         .await
         .unwrap_or(false)
+}
+
+/// Read-through cache that memoizes only a positive probe. The probe runs while
+/// the lock is held, so concurrent callers share one probe instead of forking a
+/// herd; a `false` is not stored, so it re-probes next time. Generic over the
+/// cache + probe so the caching behaviour is unit-testable without spawning gh.
+fn gh_available_via(cache: &Mutex<bool>, probe: impl FnOnce() -> bool) -> bool {
+    let mut confirmed = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *confirmed {
+        return true;
+    }
+    let available = probe();
+    if available {
+        *confirmed = true;
+    }
+    available
 }
 
 /// The PR for `branch` via the `gh` CLI, run inside `cwd`. None when gh reports
@@ -329,6 +350,27 @@ pub async fn pr_via_api(cwd: String, branch: String) -> Result<Option<PrInfo>, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gh_available_caches_positive_but_reprobes_after_false() {
+        use std::cell::Cell;
+        let cache = Mutex::new(false);
+        let calls = Cell::new(0);
+        let probe = |result: bool| {
+            calls.set(calls.get() + 1);
+            result
+        };
+        // A false result is not cached, so each call re-probes (self-heals a
+        // transient false-negative instead of disabling gh for the session).
+        assert!(!gh_available_via(&cache, || probe(false)));
+        assert!(!gh_available_via(&cache, || probe(false)));
+        assert_eq!(calls.get(), 2, "false must re-probe, not stick");
+        // The first positive is cached and sticks; later calls never re-probe.
+        assert!(gh_available_via(&cache, || probe(true)));
+        assert_eq!(calls.get(), 3);
+        assert!(gh_available_via(&cache, || panic!("cached positive must not re-probe")));
+        assert_eq!(calls.get(), 3);
+    }
 
     #[test]
     fn parses_ssh_remote() {
