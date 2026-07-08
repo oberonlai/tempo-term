@@ -1192,7 +1192,9 @@ export function TerminalView({
       }
       if (shouldCdToRoot(root, last)) {
         last = root;
-        void sessionRef.current?.write(`cd ${shellQuotePath(root)}\n`);
+        // CR (`\r`), not LF — the byte Enter sends. On Windows' ConPTY a bare LF
+        // is a `>>` continuation that never runs the cd; CR submits everywhere.
+        void sessionRef.current?.write(`cd ${shellQuotePath(root)}\r`);
       }
     });
     return () => {

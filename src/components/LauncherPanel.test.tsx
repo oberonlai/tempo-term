@@ -20,12 +20,12 @@ describe("LauncherPanel CLI launch", () => {
     useSettingsStore.setState({ claudeFlags: "--model opus" });
     render(<LauncherPanel />);
     fireEvent.click(screen.getByText("Claude Code"));
-    expect(writeToTerminal).toHaveBeenCalledWith(expect.any(String), "claude --model opus\n");
+    expect(writeToTerminal).toHaveBeenCalledWith(expect.any(String), "claude --model opus\r");
   });
 
   it("launches Codex bare when no flags are configured", () => {
     render(<LauncherPanel />);
     fireEvent.click(screen.getByText("Codex"));
-    expect(writeToTerminal).toHaveBeenCalledWith(expect.any(String), "codex\n");
+    expect(writeToTerminal).toHaveBeenCalledWith(expect.any(String), "codex\r");
   });
 });

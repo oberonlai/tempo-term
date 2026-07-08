@@ -128,7 +128,10 @@ export function runCommandInTerminal(command: string): void {
     leafId = created.activeLeafId;
   }
 
-  writeToTerminal(leafId, command.endsWith("\n") ? command : `${command}\n`);
+  // CR (`\r`), not LF — the byte Enter sends. Windows' PSReadLine treats LF as
+  // a `>>` continuation (never submits); CR submits on every platform. Strip any
+  // trailing CR/LF first so a caller-supplied newline can't yield `\n\r`.
+  writeToTerminal(leafId, `${command.replace(/[\r\n]+$/, "")}\r`);
 }
 
 /** Read the active terminal's scrollback as plain text, or null if there is

@@ -70,7 +70,7 @@ describe("resumeSession", () => {
     // registering flushes it, proving `writeToTerminal` reached the right leaf.
     const writes: string[] = [];
     registerTerminal(tab.activeLeafId, (text) => writes.push(text));
-    expect(writes).toEqual(["claude --resume sess-1\n"]);
+    expect(writes).toEqual(["claude --resume sess-1\r"]);
     unregisterTerminal(tab.activeLeafId);
   });
 
@@ -79,7 +79,7 @@ describe("resumeSession", () => {
     const tab = useTabsStore.getState().tabs[0];
     const writes: string[] = [];
     registerTerminal(tab.activeLeafId, (text) => writes.push(text));
-    expect(writes).toEqual(["codex resume sess-2\n"]);
+    expect(writes).toEqual(["codex resume sess-2\r"]);
     unregisterTerminal(tab.activeLeafId);
   });
 });

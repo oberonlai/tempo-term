@@ -56,6 +56,9 @@ export function resumeSession(s: SessionSummary): boolean {
   if (!created || created.kind !== "terminal") {
     return false;
   }
-  writeToTerminal(created.activeLeafId, `${cmd}\n`);
+  // Terminate with CR (`\r`) — the byte Enter sends. Windows' PSReadLine treats
+  // LF as a `>>` continuation that never submits; `cmd` is newline-free (built
+  // from a validated id), so a bare `\r` submits it on every platform.
+  writeToTerminal(created.activeLeafId, `${cmd}\r`);
   return true;
 }
