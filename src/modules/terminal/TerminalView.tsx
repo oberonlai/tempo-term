@@ -915,11 +915,18 @@ export function TerminalView({
         return;
       }
       dirty = false;
-      // Serialize the whole buffer first, then drop everything up to and
-      // including the restore separator so only this session's live output is
-      // persisted. Capping inside serializeBufferText could scroll the separator
-      // out of view, so strip on the full text first, then trim for size.
-      const live = dropRestoredPrefix(serializeBufferText(term), SESSION_SEPARATOR);
+      // Serialize only the tail we actually keep, not the whole buffer. The old
+      // code walked every row (up to scrollback: 10000) every 5s per busy pane —
+      // an O(buffer) cost that grew with output and blocked the UI thread. The
+      // 2x-MAX window is provably equivalent to the full walk: it always spans the
+      // restored block + the MAX live lines we keep, and once live output exceeds
+      // the window the separator is already gone, so dropRestoredPrefix's
+      // "separator absent → return as-is" branch yields the same final tail after
+      // trimScrollback.
+      const live = dropRestoredPrefix(
+        serializeBufferText(term, MAX_SCROLLBACK_LINES * 2),
+        SESSION_SEPARATOR,
+      );
       const data = trimScrollback(live, MAX_SCROLLBACK_LINES);
       void saveTerminalHistory(leafId, data).catch(() => {
         dirty = true;
