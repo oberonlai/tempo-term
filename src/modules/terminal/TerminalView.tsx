@@ -38,11 +38,10 @@ function isAppShortcut(event: KeyboardEvent): boolean {
 import { useConnectionsStore } from "@/stores/connectionsStore";
 import {
   deleteTerminalHistory,
-  dropRestoredPrefix,
   loadTerminalHistory,
   saveTerminalHistory,
   serializeBufferText,
-  trimScrollback,
+  serializeLiveTail,
   MAX_SCROLLBACK_LINES,
   SESSION_SEPARATOR,
 } from "./lib/terminalHistory";
@@ -917,17 +916,12 @@ export function TerminalView({
       dirty = false;
       // Serialize only the tail we actually keep, not the whole buffer. The old
       // code walked every row (up to scrollback: 10000) every 5s per busy pane —
-      // an O(buffer) cost that grew with output and blocked the UI thread. The
-      // 2x-MAX window is provably equivalent to the full walk: it always spans the
-      // restored block + the MAX live lines we keep, and once live output exceeds
-      // the window the separator is already gone, so dropRestoredPrefix's
-      // "separator absent → return as-is" branch yields the same final tail after
-      // trimScrollback.
-      const live = dropRestoredPrefix(
-        serializeBufferText(term, MAX_SCROLLBACK_LINES * 2),
-        SESSION_SEPARATOR,
-      );
-      const data = trimScrollback(live, MAX_SCROLLBACK_LINES);
+      // an O(buffer) cost that grew with output and blocked the UI thread.
+      // serializeLiveTail walks back by LOGICAL lines (soft-wrapped rows joined),
+      // stopping at MAX_SCROLLBACK_LINES or the restore separator, so the retained
+      // history matches a full-buffer scan even when recent output wraps wide,
+      // while still touching only O(kept) rows.
+      const data = serializeLiveTail(term, MAX_SCROLLBACK_LINES, SESSION_SEPARATOR);
       void saveTerminalHistory(leafId, data).catch(() => {
         dirty = true;
       });
