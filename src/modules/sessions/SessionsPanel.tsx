@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { History, LayoutDashboard, Pin, PinOff, Play, Search, Trash2 } from "lucide-react";
 import { Tooltip } from "@/components/Tooltip";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -139,7 +140,7 @@ function SessionRow({ session, selected }: SessionRowProps) {
   }
 
   return (
-    <li className="group">
+    <div className="group">
       <div className="flex items-center">
         <button
           type="button"
@@ -267,7 +268,65 @@ function SessionRow({ session, selected }: SessionRowProps) {
           onCancel={() => setConfirmingDelete(false)}
         />
       )}
-    </li>
+    </div>
+  );
+}
+
+/** Fixed row height (px) for the virtualized history list. The two-line row
+ *  (title + meta) plus its vertical padding is a constant height, so a fixed
+ *  size lets the virtualizer skip per-row measurement entirely. */
+const HISTORY_ROW_HEIGHT = 48;
+
+/** The indexed history list, virtualized. The user's transcript index can hold
+ *  tens of thousands of sessions; rendering every row into the DOM froze the
+ *  whole app for seconds on open (huge style-recalc + layout). This renders
+ *  only the rows in view. It shares the panel's single scroll container (passed
+ *  in as `scrollEl`) rather than owning its own, so the Live and pinned
+ *  sections above it scroll together with the history; `scrollMargin` accounts
+ *  for their height so item offsets line up. */
+function HistoryList({
+  sessions,
+  selectedId,
+  scrollEl,
+}: {
+  sessions: SessionSummary[];
+  selectedId: string | null;
+  scrollEl: HTMLDivElement | null;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: sessions.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => HISTORY_ROW_HEIGHT,
+    overscan: 12,
+    getItemKey: (index) => sessions[index].id,
+    scrollMargin: listRef.current?.offsetTop ?? 0,
+  });
+
+  const items = virtualizer.getVirtualItems();
+
+  return (
+    <div ref={listRef} style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+      {items.map((item) => {
+        const session = sessions[item.index];
+        return (
+          <div
+            key={item.key}
+            data-index={item.index}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: HISTORY_ROW_HEIGHT,
+              transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)`,
+            }}
+          >
+            <SessionRow session={session} selected={session.id === selectedId} />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -284,6 +343,11 @@ export function SessionsPanel() {
   const setModelFilter = useSessionsStore((s) => s.setModelFilter);
   const select = useSessionsStore((s) => s.select);
   const openSessionsTab = useTabsStore((s) => s.openSessionsTab);
+  // The virtualized history list reads its viewport from this scroll
+  // container. It lives in state (not a ref) so setting it on mount triggers a
+  // re-render, which is what lets the virtualizer pick up the element and
+  // compute its first visible range.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     void useSessionsStore.getState().start();
@@ -403,7 +467,7 @@ export function SessionsPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+      <div ref={setScrollEl} className="relative min-h-0 flex-1 overflow-y-auto py-1">
         <LiveSection />
 
         {!loaded ? (
@@ -423,7 +487,7 @@ export function SessionsPanel() {
                 <div className="px-3 py-1 text-[11px] font-semibold uppercase text-fg-subtle">
                   {t("sessions.pinned")}
                 </div>
-                <ul>
+                <div>
                   {pinned.map((session) => (
                     <SessionRow
                       key={session.id}
@@ -431,18 +495,10 @@ export function SessionsPanel() {
                       selected={session.id === selectedId}
                     />
                   ))}
-                </ul>
+                </div>
               </div>
             )}
-            <ul>
-              {history.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  selected={session.id === selectedId}
-                />
-              ))}
-            </ul>
+            <HistoryList sessions={history} selectedId={selectedId} scrollEl={scrollEl} />
           </>
         )}
       </div>
