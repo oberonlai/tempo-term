@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, FolderTree, GitBranch, History, LayoutGrid, NotebookPen, Server, type LucideIcon } from "lucide-react";
 import { ExplorerView } from "@/modules/explorer/ExplorerView";
@@ -47,6 +47,9 @@ export function Sidebar() {
   // True once the pointer has moved past the drag threshold, so the following
   // click is a drag release and must not also select the panel.
   const draggedRef = useRef(false);
+  // Pointer x at press time, kept in a ref so the move listener can measure the
+  // drag threshold without re-subscribing on every position change.
+  const startXRef = useRef(0);
 
   // Map a viewport x-coordinate to the insertion gap between icons (0…length)
   // and the divider's x-offset relative to the icon bar.
@@ -71,29 +74,39 @@ export function Sidebar() {
     if (e.button !== 0) {
       return;
     }
-    const startX = e.clientX;
+    startXRef.current = e.clientX;
     draggedRef.current = false;
+    setDragIndex(startIndex);
+  }
+
+  // Window-level pointer listeners live for the duration of a drag only, driven
+  // by dragIndex. Binding them here (rather than imperatively in the pointerdown
+  // handler) guarantees the cleanup runs even if the component unmounts
+  // mid-drag — e.g. the user hides the sidebar with a shortcut — so no listener
+  // is left firing setState on an unmounted component.
+  useEffect(() => {
+    if (dragIndex === null) {
+      return;
+    }
+    const from = dragIndex;
 
     function onMove(ev: PointerEvent) {
-      if (!draggedRef.current && Math.abs(ev.clientX - startX) < 4) {
+      if (!draggedRef.current && Math.abs(ev.clientX - startXRef.current) < 4) {
         return;
       }
       draggedRef.current = true;
-      setDragIndex(startIndex);
       setInsertion(insertionFromClientX(ev.clientX));
       setGhost({ x: ev.clientX, y: ev.clientY });
     }
 
     function onUp(ev: PointerEvent) {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
       if (draggedRef.current) {
         const drop = insertionFromClientX(ev.clientX);
         if (drop) {
           // A gap after the dragged slot shifts left by one once the item is
           // pulled out, so map the gap to the post-removal target index.
-          const target = drop.gap > startIndex ? drop.gap - 1 : drop.gap;
-          reorderSidebar(startIndex, target);
+          const target = drop.gap > from ? drop.gap - 1 : drop.gap;
+          reorderSidebar(from, target);
         }
       }
       setDragIndex(null);
@@ -103,7 +116,11 @@ export function Sidebar() {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragIndex, reorderSidebar]);
 
   const ghostId = dragIndex !== null ? sidebarOrder[dragIndex] : null;
   const GhostIcon = ghostId ? SIDEBAR_TABS[ghostId].icon : null;
@@ -135,7 +152,7 @@ export function Sidebar() {
                   active
                     ? "border-accent text-fg"
                     : "border-transparent text-fg-subtle hover:border-border-strong hover:text-fg"
-                } ${dragIndex === index ? "opacity-30" : ""}`}
+                } ${ghost && dragIndex === index ? "opacity-30" : ""}`}
               >
                 <Icon size={15} />
               </button>
