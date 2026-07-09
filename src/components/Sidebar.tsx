@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, FolderTree, GitBranch, History, LayoutGrid, NotebookPen, Server, type LucideIcon } from "lucide-react";
 import { ExplorerView } from "@/modules/explorer/ExplorerView";
@@ -12,37 +13,106 @@ import { useUiStore, type SidebarView } from "@/stores/uiStore";
 import { probeStart } from "@/lib/perfProbe";
 
 interface SidebarTab {
-  id: SidebarView;
   icon: LucideIcon;
   labelKey: string;
 }
 
-const SIDEBAR_TABS: SidebarTab[] = [
-  { id: "workspaces", icon: LayoutGrid, labelKey: "nav.workspaces" },
-  { id: "explorer", icon: FolderTree, labelKey: "nav.explorer" },
-  { id: "sourceControl", icon: GitBranch, labelKey: "nav.git" },
-  { id: "notes", icon: NotebookPen, labelKey: "nav.notes" },
-  { id: "ai", icon: Bot, labelKey: "nav.ai" },
-  { id: "connections", icon: Server, labelKey: "nav.connections" },
-  { id: "sessions", icon: History, labelKey: "nav.sessions" },
-];
-
-/**
- * The sidebar panels in their displayed left-to-right order, so ⌥1…⌥7 can map a
- * number to the matching panel. Kept beside SIDEBAR_TABS so the order never
- * drifts from what the icon bar renders.
- */
-export const SIDEBAR_VIEW_ORDER: SidebarView[] = SIDEBAR_TABS.map((tab) => tab.id);
+const SIDEBAR_TABS: Record<SidebarView, SidebarTab> = {
+  workspaces: { icon: LayoutGrid, labelKey: "nav.workspaces" },
+  explorer: { icon: FolderTree, labelKey: "nav.explorer" },
+  sourceControl: { icon: GitBranch, labelKey: "nav.git" },
+  notes: { icon: NotebookPen, labelKey: "nav.notes" },
+  ai: { icon: Bot, labelKey: "nav.ai" },
+  connections: { icon: Server, labelKey: "nav.connections" },
+  sessions: { icon: History, labelKey: "nav.sessions" },
+};
 
 export function Sidebar() {
   const { t } = useTranslation();
   const sidebarView = useUiStore((s) => s.sidebarView);
   const selectSidebar = useUiStore((s) => s.selectSidebar);
+  const sidebarOrder = useUiStore((s) => s.sidebarOrder);
+  const reorderSidebar = useUiStore((s) => s.reorderSidebar);
+  // Pointer-based reordering. HTML5 drag-and-drop is unusable here because
+  // Tauri's native drag-drop capture (dragDropEnabled, needed for file drops
+  // into the terminal) swallows the webview's drag events, so we drive the
+  // reorder with raw pointer events instead.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  // Insertion gap (0…length) the icon would drop into, plus the x-offset (px,
+  // relative to the icon bar) to paint the divider at. null while not dragging.
+  const [insertion, setInsertion] = useState<{ gap: number; x: number } | null>(null);
+  // The floating ghost icon's viewport position while dragging.
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  // True once the pointer has moved past the drag threshold, so the following
+  // click is a drag release and must not also select the panel.
+  const draggedRef = useRef(false);
+
+  // Map a viewport x-coordinate to the insertion gap between icons (0…length)
+  // and the divider's x-offset relative to the icon bar.
+  function insertionFromClientX(clientX: number): { gap: number; x: number } | null {
+    const bar = barRef.current;
+    if (!bar) {
+      return null;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const buttons = Array.from(bar.querySelectorAll("button"));
+    for (let i = 0; i < buttons.length; i += 1) {
+      const rect = buttons[i].getBoundingClientRect();
+      if (clientX < rect.left + rect.width / 2) {
+        return { gap: i, x: rect.left - barRect.left };
+      }
+    }
+    const last = buttons[buttons.length - 1]?.getBoundingClientRect();
+    return { gap: buttons.length, x: last ? last.right - barRect.left : 0 };
+  }
+
+  function handlePointerDown(e: React.PointerEvent, startIndex: number) {
+    if (e.button !== 0) {
+      return;
+    }
+    const startX = e.clientX;
+    draggedRef.current = false;
+
+    function onMove(ev: PointerEvent) {
+      if (!draggedRef.current && Math.abs(ev.clientX - startX) < 4) {
+        return;
+      }
+      draggedRef.current = true;
+      setDragIndex(startIndex);
+      setInsertion(insertionFromClientX(ev.clientX));
+      setGhost({ x: ev.clientX, y: ev.clientY });
+    }
+
+    function onUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (draggedRef.current) {
+        const drop = insertionFromClientX(ev.clientX);
+        if (drop) {
+          // A gap after the dragged slot shifts left by one once the item is
+          // pulled out, so map the gap to the post-removal target index.
+          const target = drop.gap > startIndex ? drop.gap - 1 : drop.gap;
+          reorderSidebar(startIndex, target);
+        }
+      }
+      setDragIndex(null);
+      setInsertion(null);
+      setGhost(null);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  const ghostId = dragIndex !== null ? sidebarOrder[dragIndex] : null;
+  const GhostIcon = ghostId ? SIDEBAR_TABS[ghostId].icon : null;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-r border-border bg-bg-inset">
-      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
-        {SIDEBAR_TABS.map(({ id, icon: Icon, labelKey }) => {
+      <div ref={barRef} className="relative flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
+        {sidebarOrder.map((id, index) => {
+          const { icon: Icon, labelKey } = SIDEBAR_TABS[id];
           const active = sidebarView === id;
           return (
             <Tooltip key={id} label={t(labelKey)} side="bottom">
@@ -50,22 +120,49 @@ export function Sidebar() {
                 type="button"
                 aria-label={t(labelKey)}
                 aria-pressed={active}
+                onPointerDown={(e) => handlePointerDown(e, index)}
                 onClick={() => {
+                  // Swallow the click that ends a drag so it does not also
+                  // switch panels.
+                  if (draggedRef.current) {
+                    draggedRef.current = false;
+                    return;
+                  }
                   if (id === "workspaces") probeStart();
                   selectSidebar(id);
                 }}
-                className={`flex h-7 w-8 items-center justify-center border-b-2 transition-colors ${
+                className={`flex h-7 w-8 select-none items-center justify-center border-b-2 transition-colors ${
                   active
                     ? "border-accent text-fg"
                     : "border-transparent text-fg-subtle hover:border-border-strong hover:text-fg"
-                }`}
+                } ${dragIndex === index ? "opacity-30" : ""}`}
               >
                 <Icon size={15} />
               </button>
             </Tooltip>
           );
         })}
+
+        {/* Insertion divider — a vertical line marking where the icon will land. */}
+        {insertion && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1 bottom-1 w-0.5 -translate-x-1/2 rounded-full bg-accent transition-[left] duration-100 ease-out"
+            style={{ left: insertion.x }}
+          />
+        )}
       </div>
+
+      {/* Floating ghost that follows the cursor while dragging. */}
+      {ghost && GhostIcon && (
+        <span
+          aria-hidden
+          className="pointer-events-none fixed z-[200] flex h-7 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-border-strong bg-bg-elevated text-fg shadow-lg"
+          style={{ left: ghost.x, top: ghost.y }}
+        >
+          <GhostIcon size={15} />
+        </span>
+      )}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {/*
