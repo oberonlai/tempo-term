@@ -13,14 +13,17 @@ export const DEFAULT_SIDEBAR_ORDER: SidebarView[] = [
   "sessions",
 ];
 
-const SIDEBAR_ORDER_STORAGE_KEY = "tempo.sidebarOrder";
+// Follows the repo's `tempoterm-` localStorage key convention (see the
+// git-graph module), not the older `tempo.` form.
+const SIDEBAR_ORDER_STORAGE_KEY = "tempoterm-sidebar-order";
 
 /**
  * Read the persisted icon-bar order from localStorage, dropping unknown ids and
  * appending any panels that were added since the order was saved. This keeps the
- * user's arrangement stable across releases even when new panels ship.
+ * user's arrangement stable across releases even when new panels ship. Exported
+ * for unit tests.
  */
-function loadSidebarOrder(): SidebarView[] {
+export function loadSidebarOrder(): SidebarView[] {
   try {
     const raw = localStorage.getItem(SIDEBAR_ORDER_STORAGE_KEY);
     if (!raw) {

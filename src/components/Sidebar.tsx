@@ -1,6 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, FolderTree, GitBranch, History, LayoutGrid, NotebookPen, Server, type LucideIcon } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { ExplorerView } from "@/modules/explorer/ExplorerView";
 import { SourceControlView } from "@/modules/source-control/SourceControlView";
 import { AIView } from "@/modules/ai/AIView";
@@ -27,159 +38,129 @@ const SIDEBAR_TABS: Record<SidebarView, SidebarTab> = {
   sessions: { icon: History, labelKey: "nav.sessions" },
 };
 
-export function Sidebar() {
+// Module-level so the reference stays stable across renders — an inline options
+// object would make useSensor/useSensors rebuild the sensors array on every
+// render (one happens mid-drag when draggingId updates). The 4px activation
+// distance keeps a plain click (panel select) from starting a drag. Mirrors
+// TabBar's tab reordering.
+const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 4 } };
+
+/** Common classes for an icon-bar button, active or not. */
+function iconButtonClass(active: boolean, dragging: boolean): string {
+  return `flex h-7 w-8 select-none items-center justify-center border-b-2 transition-colors ${
+    active
+      ? "border-accent text-fg"
+      : "border-transparent text-fg-subtle hover:border-border-strong hover:text-fg"
+  } ${dragging ? "opacity-30" : ""}`;
+}
+
+/** One draggable icon-bar entry. The dnd-kit pointer sensor distinguishes a
+ *  click (select the panel) from a drag (reorder) via the activation distance,
+ *  so no manual drag-vs-click bookkeeping is needed. */
+function SidebarIcon({
+  id,
+  active,
+  onSelect,
+}: {
+  id: SidebarView;
+  active: boolean;
+  onSelect: (id: SidebarView) => void;
+}) {
   const { t } = useTranslation();
+  const { icon: Icon, labelKey } = SIDEBAR_TABS[id];
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+        transition,
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <Tooltip label={t(labelKey)} side="bottom">
+        <button
+          type="button"
+          aria-label={t(labelKey)}
+          aria-pressed={active}
+          onClick={() => onSelect(id)}
+          className={iconButtonClass(active, isDragging)}
+        >
+          <Icon size={15} />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+export function Sidebar() {
   const sidebarView = useUiStore((s) => s.sidebarView);
   const selectSidebar = useUiStore((s) => s.selectSidebar);
   const sidebarOrder = useUiStore((s) => s.sidebarOrder);
   const reorderSidebar = useUiStore((s) => s.reorderSidebar);
-  // Pointer-based reordering. HTML5 drag-and-drop is unusable here because
-  // Tauri's native drag-drop capture (dragDropEnabled, needed for file drops
-  // into the terminal) swallows the webview's drag events, so we drive the
-  // reorder with raw pointer events instead.
-  const barRef = useRef<HTMLDivElement>(null);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  // Insertion gap (0…length) the icon would drop into, plus the x-offset (px,
-  // relative to the icon bar) to paint the divider at. null while not dragging.
-  const [insertion, setInsertion] = useState<{ gap: number; x: number } | null>(null);
-  // The floating ghost icon's viewport position while dragging.
-  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
-  // True once the pointer has moved past the drag threshold, so the following
-  // click is a drag release and must not also select the panel.
-  const draggedRef = useRef(false);
-  // Pointer x at press time, kept in a ref so the move listener can measure the
-  // drag threshold without re-subscribing on every position change.
-  const startXRef = useRef(0);
+  // Pointer-based reordering via dnd-kit. HTML5 drag-and-drop is unusable here
+  // because Tauri's native drag-drop capture (dragDropEnabled, needed for file
+  // drops into the terminal) swallows the webview's HTML5 drag events; dnd-kit's
+  // pointer sensor is unaffected and TabBar already reorders tabs the same way.
+  const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
+  const [draggingId, setDraggingId] = useState<SidebarView | null>(null);
+  const DraggingIcon = draggingId ? SIDEBAR_TABS[draggingId].icon : null;
 
-  // Map a viewport x-coordinate to the insertion gap between icons (0…length)
-  // and the divider's x-offset relative to the icon bar.
-  function insertionFromClientX(clientX: number): { gap: number; x: number } | null {
-    const bar = barRef.current;
-    if (!bar) {
-      return null;
+  function handleSelect(id: SidebarView) {
+    if (id === "workspaces") {
+      probeStart();
     }
-    const barRect = bar.getBoundingClientRect();
-    const buttons = Array.from(bar.querySelectorAll("button"));
-    for (let i = 0; i < buttons.length; i += 1) {
-      const rect = buttons[i].getBoundingClientRect();
-      if (clientX < rect.left + rect.width / 2) {
-        return { gap: i, x: rect.left - barRect.left };
-      }
-    }
-    const last = buttons[buttons.length - 1]?.getBoundingClientRect();
-    return { gap: buttons.length, x: last ? last.right - barRect.left : 0 };
+    selectSidebar(id);
   }
 
-  function handlePointerDown(e: React.PointerEvent, startIndex: number) {
-    if (e.button !== 0) {
-      return;
-    }
-    startXRef.current = e.clientX;
-    draggedRef.current = false;
-    setDragIndex(startIndex);
+  function handleDragStart(event: DragStartEvent) {
+    setDraggingId(event.active.id as SidebarView);
   }
 
-  // Window-level pointer listeners live for the duration of a drag only, driven
-  // by dragIndex. Binding them here (rather than imperatively in the pointerdown
-  // handler) guarantees the cleanup runs even if the component unmounts
-  // mid-drag — e.g. the user hides the sidebar with a shortcut — so no listener
-  // is left firing setState on an unmounted component.
-  useEffect(() => {
-    if (dragIndex === null) {
+  function handleDragEnd(event: DragEndEvent) {
+    setDraggingId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) {
       return;
     }
-    const from = dragIndex;
-
-    function onMove(ev: PointerEvent) {
-      if (!draggedRef.current && Math.abs(ev.clientX - startXRef.current) < 4) {
-        return;
-      }
-      draggedRef.current = true;
-      setInsertion(insertionFromClientX(ev.clientX));
-      setGhost({ x: ev.clientX, y: ev.clientY });
-    }
-
-    function onUp(ev: PointerEvent) {
-      if (draggedRef.current) {
-        const drop = insertionFromClientX(ev.clientX);
-        if (drop) {
-          // A gap after the dragged slot shifts left by one once the item is
-          // pulled out, so map the gap to the post-removal target index.
-          const target = drop.gap > from ? drop.gap - 1 : drop.gap;
-          reorderSidebar(from, target);
-        }
-      }
-      setDragIndex(null);
-      setInsertion(null);
-      setGhost(null);
-    }
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [dragIndex, reorderSidebar]);
-
-  const ghostId = dragIndex !== null ? sidebarOrder[dragIndex] : null;
-  const GhostIcon = ghostId ? SIDEBAR_TABS[ghostId].icon : null;
+    const from = sidebarOrder.indexOf(active.id as SidebarView);
+    const to = sidebarOrder.indexOf(over.id as SidebarView);
+    reorderSidebar(from, to);
+  }
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-r border-border bg-bg-inset">
-      <div ref={barRef} className="relative flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
-        {sidebarOrder.map((id, index) => {
-          const { icon: Icon, labelKey } = SIDEBAR_TABS[id];
-          const active = sidebarView === id;
-          return (
-            <Tooltip key={id} label={t(labelKey)} side="bottom">
-              <button
-                type="button"
-                aria-label={t(labelKey)}
-                aria-pressed={active}
-                onPointerDown={(e) => handlePointerDown(e, index)}
-                onClick={() => {
-                  // Swallow the click that ends a drag so it does not also
-                  // switch panels.
-                  if (draggedRef.current) {
-                    draggedRef.current = false;
-                    return;
-                  }
-                  if (id === "workspaces") probeStart();
-                  selectSidebar(id);
-                }}
-                className={`flex h-7 w-8 select-none items-center justify-center border-b-2 transition-colors ${
-                  active
-                    ? "border-accent text-fg"
-                    : "border-transparent text-fg-subtle hover:border-border-strong hover:text-fg"
-                } ${ghost && dragIndex === index ? "opacity-30" : ""}`}
-              >
-                <Icon size={15} />
-              </button>
-            </Tooltip>
-          );
-        })}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDraggingId(null)}
+      >
+        <div className="relative flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
+          <SortableContext items={sidebarOrder} strategy={horizontalListSortingStrategy}>
+            {sidebarOrder.map((id) => (
+              <SidebarIcon key={id} id={id} active={sidebarView === id} onSelect={handleSelect} />
+            ))}
+          </SortableContext>
+        </div>
 
-        {/* Insertion divider — a vertical line marking where the icon will land. */}
-        {insertion && (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute top-1 bottom-1 w-0.5 -translate-x-1/2 rounded-full bg-accent transition-[left] duration-100 ease-out"
-            style={{ left: insertion.x }}
-          />
-        )}
-      </div>
-
-      {/* Floating ghost that follows the cursor while dragging. */}
-      {ghost && GhostIcon && (
-        <span
-          aria-hidden
-          className="pointer-events-none fixed z-[200] flex h-7 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-border-strong bg-bg-elevated text-fg shadow-lg"
-          style={{ left: ghost.x, top: ghost.y }}
-        >
-          <GhostIcon size={15} />
-        </span>
-      )}
+        {/* Floating icon that follows the cursor while dragging. */}
+        <DragOverlay>
+          {DraggingIcon ? (
+            <span
+              aria-hidden
+              className="flex h-7 w-8 items-center justify-center rounded-md border border-border-strong bg-bg-elevated text-fg shadow-lg"
+            >
+              <DraggingIcon size={15} />
+            </span>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {/*
