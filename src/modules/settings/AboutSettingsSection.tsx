@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, GitBranch, RefreshCw } from "lucide-react";
+import { ExternalLink, GitBranch, RefreshCw, Wand2 } from "lucide-react";
 import { useUpdaterStore } from "@/stores/updaterStore";
+import { useUiStore } from "@/stores/uiStore";
 import { appBuildInfo, osLabel, type AppBuildInfo } from "./buildInfo";
 
 const REPO_URL = "https://github.com/mukiwu/tempo-term";
@@ -25,6 +26,8 @@ export function AboutSettingsSection() {
   const updaterStatus = useUpdaterStore((s) => s.status);
   const updaterError = useUpdaterStore((s) => s.errorMessage);
   const checkManually = useUpdaterStore((s) => s.checkManually);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const setSetupWizardOpen = useUiStore((s) => s.setSetupWizardOpen);
 
   useEffect(() => {
     let active = true;
@@ -113,6 +116,17 @@ export function AboutSettingsSection() {
         >
           <ExternalLink size={14} />
           {t("about.viewOnGitHub")}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSettingsOpen(false);
+            setSetupWizardOpen(true);
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3.5 py-2 text-sm text-fg transition-colors hover:border-border-strong"
+        >
+          <Wand2 size={14} />
+          {t("about.setupWizard")}
         </button>
         <button
           type="button"

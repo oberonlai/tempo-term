@@ -36,6 +36,8 @@ import { ensureNotificationPermission } from "@/modules/claude-progress/lib/noti
 import { useWatchNotes } from "@/modules/notes/lib/useWatchNotes";
 import { registerSecondaryWindowCleanup } from "@/lib/windowLifecycle";
 import { SshPromptDialog } from "@/modules/ssh/SshPromptDialog";
+import { SetupWizard } from "@/modules/setup/SetupWizard";
+import { isMainWindow } from "@/lib/window";
 import { useForwardStatusListener } from "@/modules/ssh/lib/useForwardStatus";
 import { sftpSessionStore } from "@/modules/ssh/lib/sftpSessionStore";
 import { enforceLogRetention } from "@/modules/logs/lib/sessionLog";
@@ -122,6 +124,8 @@ function App() {
   const uiZoom = useSettingsStore((s) => s.uiZoom);
   const sidebarVisible = useUiStore((s) => s.sidebarVisible);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setupWizardOpen = useUiStore((s) => s.setupWizardOpen);
+  const setSetupWizardOpen = useUiStore((s) => s.setSetupWizardOpen);
   const fileFinderOpen = useUiStore((s) => s.fileFinderOpen);
   const setFileFinderOpen = useUiStore((s) => s.setFileFinderOpen);
   const rootPath = useWorkspaceStore((s) => s.rootPath);
@@ -425,6 +429,21 @@ function App() {
     [],
   );
 
+  // Re-open the setup wizard from the File menu (works in any window).
+  useEffect(
+    () => listenWebview("menu:rerun-setup", () => setSetupWizardOpen(true)),
+    [setSetupWizardOpen],
+  );
+
+  // Auto-open the setup wizard on the very first launch. Gated to the main
+  // window: secondary windows use isolated in-memory storage, so their
+  // onboardingCompleted is always false and would otherwise re-trigger it.
+  useEffect(() => {
+    if (isMainWindow() && !useSettingsStore.getState().onboardingCompleted) {
+      setSetupWizardOpen(true);
+    }
+  }, [setSetupWizardOpen]);
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-fg">
       <TitleBar />
@@ -450,6 +469,7 @@ function App() {
 
       <StatusBar />
       {settingsOpen && <SettingsModal />}
+      {setupWizardOpen && <SetupWizard />}
       {fileFinderOpen && canSearchRoot(rootPath) && (
         <FileFinder root={rootPath} onClose={() => setFileFinderOpen(false)} />
       )}

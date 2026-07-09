@@ -60,6 +60,7 @@ use modules::sessions_index::{
     sessions_delete, sessions_export, sessions_get, sessions_index_start, sessions_list, sessions_pin,
     sessions_project_stats, sessions_stats, SessionsIndexState,
 };
+use modules::setup::{detect_tools, install_tool};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,7 +265,9 @@ pub fn run() {
             sessions_stats,
             sessions_project_stats,
             sessions_delete,
-            sessions_export
+            sessions_export,
+            detect_tools,
+            install_tool
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

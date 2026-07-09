@@ -73,6 +73,12 @@ interface SettingsState {
   uiZoom: number;
   /** Port monitor lists every listening port instead of only the current user's. */
   showAllPorts: boolean;
+  /**
+   * Whether the first-run setup wizard has been dismissed (skipped or finished).
+   * Persisted so the wizard only auto-opens on the very first launch.
+   */
+  onboardingCompleted: boolean;
+  setOnboardingCompleted: (value: boolean) => void;
   setShowAllPorts: (value: boolean) => void;
   setLanguage: (language: SupportedLanguage) => void;
   setThemeId: (themeId: string) => void;
@@ -138,6 +144,8 @@ export const useSettingsStore = create<SettingsState>()(
       actionLinksEnabled: true,
       uiZoom: DEFAULT_UI_ZOOM,
       showAllPorts: false,
+      onboardingCompleted: false,
+      setOnboardingCompleted: (value) => set({ onboardingCompleted: value }),
       setLanguage: (language) => set({ language }),
       setThemeId: (themeId) => set({ themeId }),
       setTerminalPadding: (padding) => set({ terminalPadding: clampPadding(padding) }),

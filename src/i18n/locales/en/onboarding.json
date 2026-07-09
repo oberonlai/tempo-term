@@ -1,0 +1,40 @@
+{
+  "title": "Set up your Vibe Coding tools",
+  "subtitle": "TempoTerm can install the command-line tools you need. Existing ones are detected automatically — install the rest, or skip and do it later.",
+  "stepLabel": "Step {{current}} of {{total}}",
+  "tools": {
+    "node": "Node.js",
+    "git": "Git",
+    "gh": "GitHub CLI",
+    "claude": "Claude Code CLI",
+    "codex": "Codex CLI",
+    "antigravity": "Antigravity CLI"
+  },
+  "desc": {
+    "node": "The JavaScript runtime that powers most Vibe Coding CLIs. It ships with npm, the package manager used to install Claude Code and Codex.",
+    "git": "The version control system for tracking changes and collaborating. Almost every project and AI coding workflow depends on it.",
+    "gh": "GitHub's official command-line tool. Lets you create pull requests, review issues and manage repositories without leaving the terminal.",
+    "claude": "Anthropic's agentic coding assistant in your terminal. Reads, edits and runs your codebase from natural-language instructions.",
+    "codex": "OpenAI's command-line coding agent. An alternative AI pair-programmer that works directly in your terminal.",
+    "antigravity": "Google's Antigravity CLI. Build, debug and ship from your terminal — describe what you need and it handles the rest."
+  },
+  "status": {
+    "checking": "Checking…",
+    "missing": "Not installed",
+    "outdated": "Version too old",
+    "ready": "Installed",
+    "installing": "Installing…",
+    "failed": "Install failed"
+  },
+  "actions": {
+    "install": "Install",
+    "update": "Update",
+    "download": "Download page",
+    "back": "Back",
+    "next": "Skip / Next",
+    "nextReady": "Next",
+    "skipAll": "Skip setup",
+    "finish": "Finish",
+    "done": "Done"
+  }
+}

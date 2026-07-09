@@ -50,7 +50,8 @@
     "bundleId": "套件識別碼",
     "sourceCode": "原始碼",
     "viewOnGitHub": "在 GitHub 查看",
-    "reportIssue": "回報問題"
+    "reportIssue": "回報問題",
+    "setupWizard": "安裝引導"
   },
   "update": {
     "available": "有新版本 v{{version}}",

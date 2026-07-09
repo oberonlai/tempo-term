@@ -17,6 +17,10 @@ const CYCLE_PANE_ID: &str = "cycle-pane";
 /// the same reason as Open Location: a focused native preview webview would
 /// otherwise swallow the key before the app webview's handler sees it.
 const CYCLE_PANE_EVENT: &str = "menu:focus-next-pane";
+const RERUN_SETUP_ID: &str = "rerun-setup";
+/// Emitted to the focused window when the user picks "Setup Wizard" from the
+/// File menu, so the frontend re-opens the first-run install guide on demand.
+const RERUN_SETUP_EVENT: &str = "menu:rerun-setup";
 
 /// Build the menu (Tauri's default plus custom items and a Cmd+W rebind), set it
 /// as the app menu, and wire the menu-event handler.
@@ -68,6 +72,7 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
     )?;
     let cycle_pane =
         MenuItem::with_id(&handle, CYCLE_PANE_ID, "Cycle Pane", true, Some("CmdOrCtrl+`"))?;
+    let rerun_setup = MenuItem::with_id(&handle, RERUN_SETUP_ID, "Setup Wizard", true, None::<&str>)?;
     let mut inserted = false;
     for item in menu.items()? {
         let MenuItemKind::Submenu(submenu) = item else {
@@ -86,6 +91,8 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
                 submenu.insert(&new_window, 0)?;
                 submenu.insert(&PredefinedMenuItem::separator(&handle)?, 1)?;
                 submenu.append(&open_location)?;
+                submenu.append(&PredefinedMenuItem::separator(&handle)?)?;
+                submenu.append(&rerun_setup)?;
                 submenu.append(&PredefinedMenuItem::separator(&handle)?)?;
                 submenu.append(&close_tab)?;
                 inserted = true;
@@ -127,6 +134,12 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
             // active pane; a bare emit() would cycle panes in every window.
             if let Some(win) = app.get_focused_window() {
                 let _ = win.emit_to(win.label(), CYCLE_PANE_EVENT, ());
+            }
+        } else if event.id() == RERUN_SETUP_ID {
+            // Target the focused window's label so only its frontend re-opens the
+            // setup wizard; a bare emit() would open it in every window.
+            if let Some(win) = app.get_focused_window() {
+                let _ = win.emit_to(win.label(), RERUN_SETUP_EVENT, ());
             }
         }
     });

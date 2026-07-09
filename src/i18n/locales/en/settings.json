@@ -50,7 +50,8 @@
     "bundleId": "Bundle ID",
     "sourceCode": "Source code",
     "viewOnGitHub": "View on GitHub",
-    "reportIssue": "Report an issue"
+    "reportIssue": "Report an issue",
+    "setupWizard": "Setup wizard"
   },
   "update": {
     "available": "Update available: v{{version}}",

@@ -1,0 +1,40 @@
+{
+  "title": "設定你的 Vibe Coding 工具",
+  "subtitle": "TempoTerm 可以幫你安裝所需的命令列工具。已安裝的會自動偵測，缺少的可以直接安裝，或先跳過稍後再裝。",
+  "stepLabel": "第 {{current}} / {{total}} 步",
+  "tools": {
+    "node": "Node.js",
+    "git": "Git",
+    "gh": "GitHub CLI",
+    "claude": "Claude Code CLI",
+    "codex": "Codex CLI",
+    "antigravity": "Antigravity CLI"
+  },
+  "desc": {
+    "node": "驅動大多數 Vibe Coding CLI 的 JavaScript 執行環境，內建 npm 套件管理器，Claude Code 與 Codex 都靠它安裝。",
+    "git": "追蹤程式碼變更與協作的版本控制系統。幾乎每個專案與 AI 開發流程都仰賴它。",
+    "gh": "GitHub 官方命令列工具。不用離開終端機就能建立 Pull Request、檢視 Issue、管理儲存庫。",
+    "claude": "Anthropic 的終端機 AI 開發助理。能依自然語言指示讀取、修改並執行你的程式碼。",
+    "codex": "OpenAI 的命令列開發代理。另一個直接在終端機運作的 AI 結對程式夥伴。",
+    "antigravity": "Google 的 Antigravity CLI。在終端機裡建置、除錯與交付——說出你的需求，其餘交給它處理。"
+  },
+  "status": {
+    "checking": "偵測中…",
+    "missing": "尚未安裝",
+    "outdated": "版本過舊",
+    "ready": "已安裝",
+    "installing": "安裝中…",
+    "failed": "安裝失敗"
+  },
+  "actions": {
+    "install": "安裝",
+    "update": "更新",
+    "download": "下載頁面",
+    "back": "上一步",
+    "next": "略過／下一步",
+    "nextReady": "下一步",
+    "skipAll": "略過設定",
+    "finish": "完成",
+    "done": "完成"
+  }
+}

@@ -6,6 +6,9 @@ interface UiState {
   sidebarView: SidebarView;
   sidebarVisible: boolean;
   settingsOpen: boolean;
+  /** First-run setup wizard visibility. Opened automatically on first launch and
+   *  re-openable from the File menu or the Settings About tab. */
+  setupWizardOpen: boolean;
   terminalOpen: boolean;
   fileFinderOpen: boolean;
   portsPanelOpen: boolean;
@@ -20,6 +23,7 @@ interface UiState {
   selectSidebar: (view: SidebarView) => void;
   toggleSidebar: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setSetupWizardOpen: (open: boolean) => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
   setFileFinderOpen: (open: boolean) => void;
@@ -37,6 +41,7 @@ export const useUiStore = create<UiState>((set) => ({
   sidebarView: "workspaces",
   sidebarVisible: true,
   settingsOpen: false,
+  setupWizardOpen: false,
   terminalOpen: true,
   fileFinderOpen: false,
   portsPanelOpen: false,
@@ -46,6 +51,7 @@ export const useUiStore = create<UiState>((set) => ({
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setSetupWizardOpen: (setupWizardOpen) => set({ setupWizardOpen }),
   setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
   toggleTerminal: () => set((state) => ({ terminalOpen: !state.terminalOpen })),
   setFileFinderOpen: (fileFinderOpen) => set({ fileFinderOpen }),
