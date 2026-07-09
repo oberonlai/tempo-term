@@ -2,8 +2,66 @@ import { create } from "zustand";
 
 export type SidebarView = "workspaces" | "explorer" | "sourceControl" | "ai" | "notes" | "connections" | "sessions";
 
+/** The full set of sidebar panels in their default left-to-right order. */
+export const DEFAULT_SIDEBAR_ORDER: SidebarView[] = [
+  "workspaces",
+  "explorer",
+  "sourceControl",
+  "notes",
+  "ai",
+  "connections",
+  "sessions",
+];
+
+const SIDEBAR_ORDER_STORAGE_KEY = "tempo.sidebarOrder";
+
+/**
+ * Read the persisted icon-bar order from localStorage, dropping unknown ids and
+ * appending any panels that were added since the order was saved. This keeps the
+ * user's arrangement stable across releases even when new panels ship.
+ */
+function loadSidebarOrder(): SidebarView[] {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_ORDER_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_SIDEBAR_ORDER;
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return DEFAULT_SIDEBAR_ORDER;
+    }
+    const known = new Set<SidebarView>(DEFAULT_SIDEBAR_ORDER);
+    const seen = new Set<SidebarView>();
+    const order: SidebarView[] = [];
+    for (const id of parsed) {
+      if (known.has(id as SidebarView) && !seen.has(id as SidebarView)) {
+        seen.add(id as SidebarView);
+        order.push(id as SidebarView);
+      }
+    }
+    for (const id of DEFAULT_SIDEBAR_ORDER) {
+      if (!seen.has(id)) {
+        order.push(id);
+      }
+    }
+    return order;
+  } catch {
+    return DEFAULT_SIDEBAR_ORDER;
+  }
+}
+
+function saveSidebarOrder(order: SidebarView[]): void {
+  try {
+    localStorage.setItem(SIDEBAR_ORDER_STORAGE_KEY, JSON.stringify(order));
+  } catch {
+    // Persistence is best-effort; a full or blocked localStorage is non-fatal.
+  }
+}
+
 interface UiState {
   sidebarView: SidebarView;
+  /** Icon-bar order, drag-reorderable and persisted to localStorage. */
+  sidebarOrder: SidebarView[];
   sidebarVisible: boolean;
   settingsOpen: boolean;
   terminalOpen: boolean;
@@ -18,6 +76,8 @@ interface UiState {
   overlayCount: number;
   /** Select a sidebar panel and make sure the sidebar is shown. */
   selectSidebar: (view: SidebarView) => void;
+  /** Move an icon from one position to another in the icon bar. */
+  reorderSidebar: (from: number, to: number) => void;
   toggleSidebar: () => void;
   setSettingsOpen: (open: boolean) => void;
   setTerminalOpen: (open: boolean) => void;
@@ -35,6 +95,7 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   sidebarView: "workspaces",
+  sidebarOrder: loadSidebarOrder(),
   sidebarVisible: true,
   settingsOpen: false,
   terminalOpen: true,
@@ -43,6 +104,18 @@ export const useUiStore = create<UiState>((set) => ({
   overlayCount: 0,
 
   selectSidebar: (view) => set({ sidebarView: view, sidebarVisible: true }),
+
+  reorderSidebar: (from, to) =>
+    set((state) => {
+      const order = [...state.sidebarOrder];
+      if (from < 0 || from >= order.length || to < 0 || to >= order.length || from === to) {
+        return {};
+      }
+      const [moved] = order.splice(from, 1);
+      order.splice(to, 0, moved);
+      saveSidebarOrder(order);
+      return { sidebarOrder: order };
+    }),
 
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
