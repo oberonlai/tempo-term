@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { History, LayoutDashboard, Pin, PinOff, Play, Search, Trash2 } from "lucide-react";
@@ -294,13 +294,26 @@ function HistoryList({
   scrollEl: HTMLDivElement | null;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  // The list starts below the Live and pinned sections, so its offset from the
+  // scroll container's top is the virtualizer's scrollMargin. A ref's
+  // offsetTop can't be read during render (it's null on the first pass, and
+  // ref changes don't re-render), so measure it in a layout effect and store
+  // it in state. Running on every commit — guarded to only set state when the
+  // value actually changed — keeps it correct when the sections above grow or
+  // shrink (Live sessions start/stop, a pin is toggled) without a dependency
+  // list that would miss those layout shifts.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    const top = listRef.current?.offsetTop ?? 0;
+    setScrollMargin((prev) => (prev === top ? prev : top));
+  });
   const virtualizer = useVirtualizer({
     count: sessions.length,
     getScrollElement: () => scrollEl,
     estimateSize: () => HISTORY_ROW_HEIGHT,
     overscan: 12,
     getItemKey: (index) => sessions[index].id,
-    scrollMargin: listRef.current?.offsetTop ?? 0,
+    scrollMargin,
   });
 
   const items = virtualizer.getVirtualItems();
