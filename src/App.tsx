@@ -37,6 +37,7 @@ import { useWatchNotes } from "@/modules/notes/lib/useWatchNotes";
 import { registerSecondaryWindowCleanup } from "@/lib/windowLifecycle";
 import { SshPromptDialog } from "@/modules/ssh/SshPromptDialog";
 import { SetupWizard } from "@/modules/setup/SetupWizard";
+import { detectTools, isToolReady } from "@/modules/setup/lib/setupTools";
 import { isMainWindow } from "@/lib/window";
 import { useForwardStatusListener } from "@/modules/ssh/lib/useForwardStatus";
 import { sftpSessionStore } from "@/modules/ssh/lib/sftpSessionStore";
@@ -438,10 +439,30 @@ function App() {
   // Auto-open the setup wizard on the very first launch. Gated to the main
   // window: secondary windows use isolated in-memory storage, so their
   // onboardingCompleted is always false and would otherwise re-trigger it.
+  // If every tool is already installed (e.g. an existing user upgrading to the
+  // version that adds this flag), silently mark onboarding done instead of
+  // interrupting them. Detection failure falls back to showing the wizard.
   useEffect(() => {
-    if (isMainWindow() && !useSettingsStore.getState().onboardingCompleted) {
-      setSetupWizardOpen(true);
+    if (!isMainWindow() || useSettingsStore.getState().onboardingCompleted) {
+      return;
     }
+    let cancelled = false;
+    void detectTools()
+      .then((res) => {
+        if (cancelled) return;
+        const allReady = res.tools.length > 0 && res.tools.every(isToolReady);
+        if (allReady) {
+          useSettingsStore.getState().setOnboardingCompleted(true);
+        } else {
+          setSetupWizardOpen(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSetupWizardOpen(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [setSetupWizardOpen]);
 
   return (

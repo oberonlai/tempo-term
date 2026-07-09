@@ -54,7 +54,16 @@ export function SetupWizard() {
   const [installing, setInstalling] = useState<ToolId | null>(null);
   const [failed, setFailed] = useState<Set<ToolId>>(new Set());
   const [logLines, setLogLines] = useState<string[]>([]);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const logBoxRef = useRef<HTMLDivElement | null>(null);
+  // Guards against setState after unmount: install streams and detection resolve
+  // asynchronously and can land after the user closes the wizard mid-run.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const total = TOOL_REGISTRY.length;
   const meta = TOOL_REGISTRY[step];
@@ -68,7 +77,10 @@ export function SetupWizard() {
 
   const refresh = useCallback(async () => {
     try {
-      setDetection(await detectTools());
+      const result = await detectTools();
+      if (mountedRef.current) {
+        setDetection(result);
+      }
     } catch {
       // Detection failure leaves the step in its "checking" phase; the user can
       // still skip forward. Nothing actionable to surface here.
@@ -79,14 +91,31 @@ export function SetupWizard() {
     void refresh();
   }, [refresh]);
 
+  // Keep the newest line in view by scrolling the log container itself, rather
+  // than scrollIntoView (which would also scroll the whole modal/page).
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ block: "end" });
+    const box = logBoxRef.current;
+    if (box) {
+      box.scrollTop = box.scrollHeight;
+    }
   }, [logLines]);
 
   const close = useCallback(() => {
     setOnboardingCompleted(true);
     setSetupWizardOpen(false);
   }, [setOnboardingCompleted, setSetupWizardOpen]);
+
+  // Esc closes the wizard (unless an install is mid-flight, to avoid orphaning
+  // a running process silently). Mirrors ConfirmDialog's accessibility.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !installing) {
+        close();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close, installing]);
 
   const goNext = useCallback(() => {
     if (isLast) {
@@ -116,9 +145,14 @@ export function SetupWizard() {
       });
       let code = -1;
       try {
-        code = await installTool(id, (line) => setLogLines((prev) => [...prev, line]));
+        code = await installTool(id, (line) => {
+          if (mountedRef.current) setLogLines((prev) => [...prev, line]);
+        });
       } catch (err) {
-        setLogLines((prev) => [...prev, String(err)]);
+        if (mountedRef.current) setLogLines((prev) => [...prev, String(err)]);
+      }
+      if (!mountedRef.current) {
+        return;
       }
       if (code !== 0) {
         setFailed((prev) => new Set(prev).add(id));
@@ -168,13 +202,15 @@ export function SetupWizard() {
           <p className="mt-2 text-sm leading-relaxed text-fg-muted">{t(`desc.${meta.name}`)}</p>
 
           {logLines.length > 0 ? (
-            <div className="mt-4 max-h-44 overflow-y-auto rounded-lg border border-border bg-black/40 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted">
+            <div
+              ref={logBoxRef}
+              className="mt-4 max-h-44 overflow-y-auto rounded-lg border border-border bg-black/40 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted"
+            >
               {logLines.map((line, i) => (
                 <div key={i} className="whitespace-pre-wrap break-all">
                   {line}
                 </div>
               ))}
-              <div ref={logEndRef} />
             </div>
           ) : null}
         </div>

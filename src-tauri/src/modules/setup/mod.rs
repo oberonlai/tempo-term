@@ -5,10 +5,18 @@
 //! one-line change; version comparison is a pure function for easy testing.
 
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
+use wait_timeout::ChildExt;
+
+/// Ceiling on a single `<tool> --version` probe. A hung binary (a stalled
+/// mount, an interactive prompt) must not freeze detection — bound the wait and
+/// treat a timeout as "not installed". Detection runs ~6 probes on first launch.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A single tool the wizard knows how to detect and install. The install
 /// commands are the raw shell strings run per platform; an empty string means
@@ -70,7 +78,10 @@ const TOOLS: &[ToolSpec] = &[
         bin: "antigravity",
         min_version: None,
         mac_install: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-        windows_install: "curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd",
+        // Write the installer to an absolute TEMP path (the GUI process CWD is
+        // often read-only) and clean up unconditionally with `&` — `&&` would
+        // skip `del` whenever curl fails, leaving the file behind.
+        windows_install: "curl -fsSL https://antigravity.google/cli/install.cmd -o \"%TEMP%\\ag_install.cmd\" & call \"%TEMP%\\ag_install.cmd\" & del \"%TEMP%\\ag_install.cmd\"",
     },
 ];
 
@@ -141,14 +152,125 @@ pub fn meets_min(version: &str, min: &str) -> bool {
     true
 }
 
-/// Run `<bin> --version` and return its combined output, or None if the binary
-/// is absent or errors out.
-fn probe_version(bin: &str) -> Option<String> {
-    let output = Command::new(bin)
+/// Candidate file names for an executable. Windows binaries carry an extension
+/// (`node.exe`) and npm/antigravity ship `.cmd`/`.bat` shims — a bare `claude`
+/// file never exists on disk there (#89) — so probe every common extension;
+/// elsewhere the stem itself is the only candidate. Pure for testing.
+fn exe_names(stem: &str, windows: bool) -> Vec<String> {
+    if windows {
+        [".exe", ".cmd", ".bat"]
+            .iter()
+            .map(|ext| format!("{stem}{ext}"))
+            .collect()
+    } else {
+        vec![stem.to_string()]
+    }
+}
+
+/// Directories to search for a CLI, in priority order: PATH first, then the
+/// common install locations a GUI launch's minimal PATH omits (Homebrew/npm on
+/// macOS; Program Files, chocolatey, scoop and the npm prefix on Windows). Pure
+/// so both platform arms are unit-tested on the macOS CI runner.
+fn search_dirs(
+    path_env: Option<&str>,
+    home: Option<&str>,
+    appdata: Option<&str>,
+    windows: bool,
+) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = match path_env {
+        Some(path) => std::env::split_paths(path).collect(),
+        None => Vec::new(),
+    };
+    if windows {
+        for extra in [
+            r"C:\Program Files\nodejs",
+            r"C:\Program Files\Git\cmd",
+            r"C:\Program Files\GitHub CLI",
+            r"C:\Program Files (x86)\GitHub CLI",
+            r"C:\ProgramData\chocolatey\bin",
+        ] {
+            dirs.push(PathBuf::from(extra));
+        }
+        // npm installs global shims (claude.cmd, codex.cmd) under %APPDATA%\npm.
+        if let Some(appdata) = appdata {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(home) = home {
+            dirs.push(PathBuf::from(home).join("scoop").join("shims"));
+        }
+    } else {
+        for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"] {
+            dirs.push(PathBuf::from(extra));
+        }
+        if let Some(home) = home {
+            // npm --prefix bins, antigravity's installer dir, and pipx-style bins.
+            dirs.push(PathBuf::from(home).join(".local").join("bin"));
+            dirs.push(PathBuf::from(home).join(".antigravity").join("bin"));
+        }
+    }
+    dirs
+}
+
+/// Absolute path to `stem`'s executable, or None when it isn't installed.
+/// Resolving to an absolute path (never spawning a bare name) both finds the
+/// Windows `.exe`/`.cmd` forms and avoids the `CreateProcess` CWD-search hijack,
+/// where a planted same-named binary in a writable working dir would run instead.
+fn find_tool(stem: &str) -> Option<PathBuf> {
+    let path_env = std::env::var("PATH").ok();
+    let home = std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok());
+    let appdata = std::env::var("APPDATA").ok();
+    let windows = cfg!(windows);
+    let names = exe_names(stem, windows);
+    for dir in search_dirs(path_env.as_deref(), home.as_deref(), appdata.as_deref(), windows) {
+        for name in &names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Build a `Command` with the console suppressed on Windows. A release build has
+/// no console of its own (windows_subsystem = "windows"), so an un-flagged spawn
+/// allocates a fresh console that flashes a window — detection alone spawns one
+/// probe per tool. A no-op on Unix and on debug builds. See git::run_git / pr.
+fn tool_command(exe: &std::path::Path) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new(exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+/// Resolve and run `<tool> --version`, returning the parsed version or None if
+/// the tool is absent, errors, or outruns PROBE_TIMEOUT (killed so a hung binary
+/// never lingers). Reads output only after the process exits — `--version` is a
+/// few bytes, well under the pipe buffer, so this cannot deadlock.
+fn probe_version(stem: &str) -> Option<String> {
+    let exe = find_tool(stem)?;
+    let mut child = tool_command(&exe)
         .arg("--version")
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .ok()?;
+    let output = match child.wait_timeout(PROBE_TIMEOUT) {
+        Ok(Some(_)) => child.wait_with_output().ok()?,
+        Ok(None) | Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    };
     if !output.status.success() && output.stdout.is_empty() {
         return None;
     }
@@ -157,32 +279,6 @@ fn probe_version(bin: &str) -> Option<String> {
         text = String::from_utf8_lossy(&output.stderr).into_owned();
     }
     parse_version(&text)
-}
-
-/// Whether a command is resolvable on PATH.
-fn command_exists(bin: &str) -> bool {
-    let (finder, arg) = if cfg!(target_os = "windows") {
-        ("where", bin)
-    } else {
-        ("command", bin)
-    };
-    // `command -v` is a shell builtin, so route it through the shell on unix.
-    if cfg!(target_os = "windows") {
-        Command::new(finder)
-            .arg(arg)
-            .stdin(Stdio::null())
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    } else {
-        Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {bin}"))
-            .stdin(Stdio::null())
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
 }
 
 /// The install command string for `spec` on the current OS ("" when none).
@@ -226,8 +322,9 @@ fn detect_tools_blocking() -> DetectResult {
 
     DetectResult {
         tools,
-        brew: command_exists("brew"),
-        winget: command_exists("winget"),
+        // Pure filesystem resolution — no subprocess, so no console flash.
+        brew: find_tool("brew").is_some(),
+        winget: find_tool("winget").is_some(),
     }
 }
 
@@ -250,25 +347,34 @@ pub async fn install_tool(id: String, on_output: Channel<String>) -> Result<i32,
         .map_err(|e| e.to_string())?
 }
 
+/// Run one install command, streaming its output over `on_output`. The shell
+/// merges stderr into stdout (`2>&1`) so a single reader captures everything in
+/// order; the child's own stderr pipe is therefore closed (`Stdio::null()`).
+///
+/// Note: the install cannot be cancelled from the UI — closing the wizard leaves
+/// the spawned process (npm/brew/winget) running to completion in the background.
 fn run_install(cmd: &str, on_output: &Channel<String>) -> Result<i32, String> {
-    let mut child = if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .arg("/C")
-            .arg(format!("{cmd} 2>&1"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+    // Run from a writable directory: the GUI process CWD is often read-only
+    // (install dir / System32), which breaks installers that write to CWD (e.g.
+    // antigravity's downloaded .cmd). CREATE_NO_WINDOW keeps a release build from
+    // flashing a console for the shell it spawns.
+    let temp = std::env::temp_dir();
+    let mut builder = if cfg!(target_os = "windows") {
+        let mut c = tool_command(std::path::Path::new("cmd"));
+        c.arg("/C").arg(format!("{cmd} 2>&1"));
+        c
     } else {
-        Command::new("sh")
-            .arg("-c")
-            .arg(format!("{cmd} 2>&1"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-    }
-    .map_err(|e| format!("failed to start install: {e}"))?;
+        let mut c = tool_command(std::path::Path::new("sh"));
+        c.arg("-c").arg(format!("{cmd} 2>&1"));
+        c
+    };
+    let mut child = builder
+        .current_dir(temp)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to start install: {e}"))?;
 
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
@@ -316,5 +422,48 @@ mod tests {
         assert!(meets_min("2", "2.0"));
         assert!(meets_min("2.0", "2"));
         assert!(!meets_min("garbage", "2.0"));
+    }
+
+    #[test]
+    fn exe_names_appends_windows_extensions_only_on_windows() {
+        // #89: npm ships claude.cmd, so probing a bare `claude` never matches on
+        // Windows — the .cmd/.exe/.bat forms must be tried.
+        assert_eq!(exe_names("claude", false), vec!["claude".to_string()]);
+        let win = exe_names("claude", true);
+        assert!(win.contains(&"claude.exe".to_string()));
+        assert!(win.contains(&"claude.cmd".to_string()));
+        assert!(win.contains(&"claude.bat".to_string()));
+        assert!(!win.contains(&"claude".to_string()));
+    }
+
+    #[test]
+    fn search_dirs_prepends_path_then_platform_locations() {
+        // NB: std::env::split_paths uses the *host* separator, so a Windows-style
+        // PATH can't be split correctly on the macOS test runner — assert only
+        // the platform extras for the Windows arm, and PATH order on the Unix arm.
+        let home = r"C:\Users\me";
+        let appdata = r"C:\Users\me\AppData\Roaming";
+        let win = search_dirs(None, Some(home), Some(appdata), true);
+        // Static install dirs are literals; joined dirs are built the same way so
+        // the assertion is separator-agnostic (join uses `/` on the macOS runner).
+        assert!(win.contains(&PathBuf::from(r"C:\Program Files\nodejs")));
+        // npm global shims live under %APPDATA%\npm.
+        assert!(win.contains(&PathBuf::from(appdata).join("npm")));
+        assert!(win.contains(&PathBuf::from(home).join("scoop").join("shims")));
+
+        let unix = search_dirs(Some("/usr/bin"), Some("/home/me"), None, false);
+        assert_eq!(unix.first(), Some(&PathBuf::from("/usr/bin")));
+        assert!(unix.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(unix.contains(&PathBuf::from("/home/me/.antigravity/bin")));
+    }
+
+    #[test]
+    fn search_dirs_works_without_a_path_or_home() {
+        // A GUI launch can hand us no PATH and no HOME; resolution must still
+        // return the platform install dirs rather than panic on None.
+        let unix = search_dirs(None, None, None, false);
+        assert!(unix.contains(&PathBuf::from("/usr/local/bin")));
+        let win = search_dirs(None, None, None, true);
+        assert!(win.contains(&PathBuf::from(r"C:\ProgramData\chocolatey\bin")));
     }
 }
