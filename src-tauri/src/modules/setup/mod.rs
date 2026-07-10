@@ -75,7 +75,10 @@ const TOOLS: &[ToolSpec] = &[
         // Official installer scripts from https://antigravity.google/cli.
         // macOS/Linux uses the bash installer; Windows uses the CMD installer.
         id: "antigravity",
-        bin: "antigravity",
+        // The installer drops a binary named `agy` (e.g. ~/.local/bin/agy), NOT
+        // `antigravity` — probing the latter always reports "not installed" and
+        // re-running the installer just says it is already present.
+        bin: "agy",
         min_version: None,
         mac_install: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         // Write the installer to an absolute TEMP path (the GUI process CWD is
