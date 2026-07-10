@@ -39,6 +39,26 @@ if (typeof HTMLElement.prototype.scrollIntoView === "undefined") {
   HTMLElement.prototype.scrollIntoView = () => {};
 }
 
+// jsdom performs no layout, so offsetWidth/offsetHeight are always 0.
+// @tanstack/react-virtual (the sessions history list) reads its scroll
+// element's viewport from offsetHeight on mount and, seeing 0, renders zero
+// rows — seeded rows then never appear under test. Report a fixed non-zero
+// viewport so the virtualizer has a window to fill. Row heights come from the
+// virtualizer's fixed estimate (it does not measure individual rows), so a
+// uniform stub here does not distort them.
+Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+  configurable: true,
+  get() {
+    return 800;
+  },
+});
+Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+  configurable: true,
+  get() {
+    return 300;
+  },
+});
+
 if (typeof window.matchMedia === "undefined") {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,

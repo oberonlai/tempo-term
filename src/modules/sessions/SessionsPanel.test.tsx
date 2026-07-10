@@ -450,11 +450,13 @@ describe("SessionsPanel", () => {
     expect(useSessionsStore.getState().selectedId).toBe("a");
   });
 
-  it("clears the delete error line when a new delete attempt starts", async () => {
+  it("clears the delete error when a new delete attempt starts", async () => {
     seedSessions([session({ id: "a", title: "Deploy script" })]);
     await renderSettled();
     deleteFailure.current = true;
 
+    // The delete confirmation is panel-level (shared, above the virtualized
+    // rows), so a failed attempt keeps the dialog open with an inline error.
     fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
     await act(async () => {
       fireEvent.click(
@@ -464,7 +466,8 @@ describe("SessionsPanel", () => {
     });
     expect(screen.getByText("sessions.deleteError")).toBeInTheDocument();
 
-    // Re-opening the confirm dialog starts a fresh attempt: stale error gone.
+    // Dismiss, then start a fresh attempt from the row: the stale error is gone.
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "actions.cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
 
     expect(screen.queryByText("sessions.deleteError")).not.toBeInTheDocument();

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { History, LayoutDashboard, Pin, PinOff, Play, Search, Trash2 } from "lucide-react";
 import { Tooltip } from "@/components/Tooltip";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -101,19 +102,20 @@ function LiveSection() {
 interface SessionRowProps {
   session: SessionSummary;
   selected: boolean;
+  /** Asks the panel to open its shared, panel-level delete confirmation for
+   *  this session. Deletion is handled above the virtualized rows so the modal
+   *  isn't trapped by a row's `transform` (which would become the containing
+   *  block for its `position: fixed`) and doesn't vanish when the row scrolls
+   *  out of the render window. */
+  onRequestDelete: (session: SessionSummary) => void;
 }
 
-function SessionRow({ session, selected }: SessionRowProps) {
+function SessionRow({ session, selected, onRequestDelete }: SessionRowProps) {
   const { t } = useTranslation();
   const select = useSessionsStore((s) => s.select);
   const selectProject = useSessionsStore((s) => s.selectProject);
   const togglePin = useSessionsStore((s) => s.togglePin);
   const openSessionsTab = useTabsStore((s) => s.openSessionsTab);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Delete is destructive (even if recoverable from the Trash), so a failure
-  // must never pass silently: this renders an error line under the row until
-  // the next delete attempt replaces it.
-  const [deleteError, setDeleteError] = useState(false);
   const pinLabel = t(session.pinned ? "sessions.unpin" : "sessions.pin");
   const resumeLabel = t("sessions.resume");
   const deleteLabel = t("sessions.delete");
@@ -122,24 +124,8 @@ function SessionRow({ session, selected }: SessionRowProps) {
   // instead, since there's space there for the explanation.
   const canResume = resumeCommand(session.agent, session.id) !== null;
 
-  // Trashing is recoverable (never a permanent delete), but it still touches
-  // real files on disk, so it goes through the shared ConfirmDialog rather
-  // than firing on click like pin/resume do.
-  async function handleDelete() {
-    setConfirmingDelete(false);
-    try {
-      await sessionsDelete(session.id);
-    } catch {
-      setDeleteError(true);
-      return;
-    }
-    if (selected) {
-      select(null);
-    }
-  }
-
   return (
-    <li className="group">
+    <div role="listitem" className="group">
       <div className="flex items-center">
         <button
           type="button"
@@ -241,9 +227,7 @@ function SessionRow({ session, selected }: SessionRowProps) {
               aria-label={deleteLabel}
               onClick={(e) => {
                 e.stopPropagation();
-                // A fresh attempt supersedes any stale error from the last one.
-                setDeleteError(false);
-                setConfirmingDelete(true);
+                onRequestDelete(session);
               }}
               className="rounded p-0.5 text-fg-subtle hover:bg-border-strong hover:text-danger"
             >
@@ -252,22 +236,102 @@ function SessionRow({ session, selected }: SessionRowProps) {
           </Tooltip>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {deleteError && (
-        <p className="px-3 pb-1 text-xs text-danger/80">{t("sessions.deleteError")}</p>
-      )}
+/** Fixed row height (px) for the virtualized history list. The two-line row
+ *  (title + meta) plus its vertical padding is a constant height, so a fixed
+ *  size lets the virtualizer skip per-row measurement entirely. */
+const HISTORY_ROW_HEIGHT = 48;
 
-      {confirmingDelete && (
-        <ConfirmDialog
-          title={deleteLabel}
-          message={t("sessions.deleteConfirm")}
-          confirmLabel={deleteLabel}
-          cancelLabel={t("actions.cancel")}
-          onConfirm={() => void handleDelete()}
-          onCancel={() => setConfirmingDelete(false)}
-        />
-      )}
-    </li>
+/** The indexed history list, virtualized. The user's transcript index can hold
+ *  tens of thousands of sessions; rendering every row into the DOM froze the
+ *  whole app for seconds on open (huge style-recalc + layout). This renders
+ *  only the rows in view. It shares the panel's single scroll container (passed
+ *  in as `scrollEl`) rather than owning its own, so the Live and pinned
+ *  sections above it scroll together with the history; `scrollMargin` accounts
+ *  for their height so item offsets line up. */
+function HistoryList({
+  sessions,
+  selectedId,
+  scrollEl,
+  contentEl,
+  onRequestDelete,
+}: {
+  sessions: SessionSummary[];
+  selectedId: string | null;
+  scrollEl: HTMLDivElement | null;
+  /** The scroll container's inner content wrapper (Live + pinned + this list).
+   *  Observed for resize so `scrollMargin` re-measures when the sections above
+   *  change height — e.g. a Live session starts/ends. Those sections are
+   *  sibling subtrees that re-render on their own store updates without
+   *  re-rendering this component, so a plain layout effect would miss the
+   *  shift and only self-correct on the next scroll. */
+  contentEl: HTMLElement | null;
+  onRequestDelete: (session: SessionSummary) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  // The list starts below the Live and pinned sections, so its offset from the
+  // scroll container's top is the virtualizer's scrollMargin. A ref's offsetTop
+  // can't be read during render, so measure it in a layout effect (on mount and
+  // whenever the content wrapper resizes), guarded to only set state on a real
+  // change.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const top = listRef.current?.offsetTop ?? 0;
+      setScrollMargin((prev) => (prev === top ? prev : top));
+    };
+    measure();
+    if (!contentEl) {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(contentEl);
+    return () => observer.disconnect();
+  }, [contentEl]);
+  const virtualizer = useVirtualizer({
+    count: sessions.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => HISTORY_ROW_HEIGHT,
+    overscan: 12,
+    getItemKey: (index) => sessions[index].id,
+    scrollMargin,
+  });
+
+  const items = virtualizer.getVirtualItems();
+
+  return (
+    <div
+      ref={listRef}
+      role="list"
+      style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+    >
+      {items.map((item) => {
+        const session = sessions[item.index];
+        return (
+          <div
+            key={item.key}
+            data-index={item.index}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: HISTORY_ROW_HEIGHT,
+              transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)`,
+            }}
+          >
+            <SessionRow
+              session={session}
+              selected={session.id === selectedId}
+              onRequestDelete={onRequestDelete}
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -284,6 +348,43 @@ export function SessionsPanel() {
   const setModelFilter = useSessionsStore((s) => s.setModelFilter);
   const select = useSessionsStore((s) => s.select);
   const openSessionsTab = useTabsStore((s) => s.openSessionsTab);
+  // The virtualized history list reads its viewport from this scroll
+  // container. It lives in state (not a ref) so setting it on mount triggers a
+  // re-render, which is what lets the virtualizer pick up the element and
+  // compute its first visible range.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // The scroll container's inner content wrapper, handed to HistoryList so it
+  // can observe height changes above the list. In state (not a ref) so the
+  // observer effect re-runs once the element mounts.
+  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null);
+  // Delete confirmation is owned here, above the virtualized rows, rather than
+  // inside each row: a row's `transform` would trap the modal's `position:
+  // fixed`, and the row can unmount mid-dialog as it scrolls out of the render
+  // window. `deleteFailed` keeps the dialog open with an inline error.
+  const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
+  const [deleteFailed, setDeleteFailed] = useState(false);
+
+  const requestDelete = (session: SessionSummary) => {
+    setDeleteFailed(false);
+    setPendingDelete(session);
+  };
+
+  async function confirmDelete() {
+    const target = pendingDelete;
+    if (!target) {
+      return;
+    }
+    try {
+      await sessionsDelete(target.id);
+    } catch {
+      setDeleteFailed(true);
+      return;
+    }
+    setPendingDelete(null);
+    if (selectedId === target.id) {
+      select(null);
+    }
+  }
 
   useEffect(() => {
     void useSessionsStore.getState().start();
@@ -403,49 +504,62 @@ export function SessionsPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
-        <LiveSection />
+      <div ref={setScrollEl} className="relative min-h-0 flex-1 overflow-y-auto py-1">
+        <div ref={setContentEl}>
+          <LiveSection />
 
-        {!loaded ? (
-          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
-            <History size={28} className="text-fg-subtle" />
-            <p className="text-xs text-fg-subtle">{t("sessions.indexing")}</p>
-          </div>
-        ) : isEmpty ? (
-          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
-            <History size={28} className="text-fg-subtle" />
-            <p className="text-xs text-fg-subtle">{t("sessions.empty")}</p>
-          </div>
-        ) : (
-          <>
-            {pinned.length > 0 && (
-              <div>
-                <div className="px-3 py-1 text-[11px] font-semibold uppercase text-fg-subtle">
-                  {t("sessions.pinned")}
+          {!loaded ? (
+            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+              <History size={28} className="text-fg-subtle" />
+              <p className="text-xs text-fg-subtle">{t("sessions.indexing")}</p>
+            </div>
+          ) : isEmpty ? (
+            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+              <History size={28} className="text-fg-subtle" />
+              <p className="text-xs text-fg-subtle">{t("sessions.empty")}</p>
+            </div>
+          ) : (
+            <>
+              {pinned.length > 0 && (
+                <div>
+                  <div className="px-3 py-1 text-[11px] font-semibold uppercase text-fg-subtle">
+                    {t("sessions.pinned")}
+                  </div>
+                  <div role="list">
+                    {pinned.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        selected={session.id === selectedId}
+                        onRequestDelete={requestDelete}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <ul>
-                  {pinned.map((session) => (
-                    <SessionRow
-                      key={session.id}
-                      session={session}
-                      selected={session.id === selectedId}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-            <ul>
-              {history.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  selected={session.id === selectedId}
-                />
-              ))}
-            </ul>
-          </>
-        )}
+              )}
+              <HistoryList
+                sessions={history}
+                selectedId={selectedId}
+                scrollEl={scrollEl}
+                contentEl={contentEl}
+                onRequestDelete={requestDelete}
+              />
+            </>
+          )}
+        </div>
       </div>
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={t("sessions.delete")}
+          message={t("sessions.deleteConfirm")}
+          confirmLabel={t("sessions.delete")}
+          cancelLabel={t("actions.cancel")}
+          error={deleteFailed ? t("sessions.deleteError") : undefined}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

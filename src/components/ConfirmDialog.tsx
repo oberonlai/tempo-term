@@ -8,6 +8,10 @@ interface ConfirmDialogProps {
   cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Shown in red under the message when a confirm attempt failed, so the
+   *  dialog can stay open and report the error in place rather than the caller
+   *  surfacing it elsewhere. */
+  error?: string;
 }
 
 export function ConfirmDialog({
@@ -17,6 +21,7 @@ export function ConfirmDialog({
   cancelLabel,
   onConfirm,
   onCancel,
+  error,
 }: ConfirmDialogProps) {
   // Mounted only while open, so guard unconditionally to hide the preview webview.
   useOverlayGuard(true);
@@ -38,7 +43,10 @@ export function ConfirmDialog({
         <div className="border-b border-border px-4 py-3">
           <span className="text-sm font-semibold text-fg">{title}</span>
         </div>
-        <div className="px-4 py-4 text-sm text-fg-muted">{message}</div>
+        <div className="px-4 py-4 text-sm text-fg-muted">
+          {message}
+          {error && <p className="mt-2 text-danger/90">{error}</p>}
+        </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
           <button
             type="button"
