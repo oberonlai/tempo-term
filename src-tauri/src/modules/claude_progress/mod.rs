@@ -44,8 +44,11 @@ pub fn extract_session_title(contents: &str) -> Option<String> {
             }
             // `/rename` is echoed into the transcript as a local-command result
             // ("<local-command-stdout>Session renamed to: NAME</local-command-stdout>").
-            // Latest one wins, so keep overwriting.
-            Some("system") => {
+            // Restrict to `local_command` so an unrelated system line that merely
+            // quotes the phrase can't be mistaken for a rename. Latest one wins.
+            Some("system")
+                if value.get("subtype").and_then(Value::as_str) == Some("local_command") =>
+            {
                 if let Some(name) = value
                     .get("content")
                     .and_then(Value::as_str)
@@ -76,7 +79,9 @@ fn parse_renamed_name(content: &str) -> Option<String> {
     let start = content.rfind(MARKER)? + MARKER.len();
     let rest = &content[start..];
     let end = rest.find("</local-command-stdout>").unwrap_or(rest.len());
-    let name = rest[..end].trim();
+    // Only the first line: guards against trailing hooks/prompt output that some
+    // shells append after the rename notice.
+    let name = rest[..end].lines().next().unwrap_or("").trim();
     if name.is_empty() {
         None
     } else {
@@ -480,6 +485,24 @@ mod tests {
             parse_renamed_name("<local-command-stdout>Session renamed to: </local-command-stdout>"),
             None,
         );
+        // Trailing hook/prompt output after the name is dropped (first line only).
+        assert_eq!(
+            parse_renamed_name("Session renamed to: my-name\nhook: did a thing\n$ ").as_deref(),
+            Some("my-name"),
+        );
+    }
+
+    #[test]
+    fn rename_only_counts_local_command_system_lines() {
+        // A system line that quotes the phrase but is NOT a local_command must be
+        // ignored, so the title falls back rather than mis-reading it as a rename.
+        let contents = concat!(
+            r#"{"type":"system","subtype":"info","content":"note: Session renamed to: not-a-real-rename"}"#,
+            "\n",
+            r#"{"type":"ai-title","aiTitle":"Auto title"}"#,
+            "\n",
+        );
+        assert_eq!(extract_session_title(contents).as_deref(), Some("Auto title"));
     }
 
     #[test]
