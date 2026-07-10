@@ -17,11 +17,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// Longest session title we keep; longer text is truncated for display.
 const MAX_TITLE_CHARS: usize = 80;
 
-/// Derive a human-readable title for a session from its transcript JSONL: the
-/// latest `ai-title` record's title, else the first user text message. Returns
-/// trimmed text truncated to MAX_TITLE_CHARS characters, or None when neither
-/// source exists.
+/// Derive a human-readable title for a session from its transcript JSONL, in
+/// priority order: the name the user set with Claude Code's `/rename` (latest
+/// wins), else the latest `ai-title` record, else the first user text message.
+/// Returns trimmed text truncated to MAX_TITLE_CHARS characters, or None when no
+/// source exists. The `/rename` name is preferred because it is the user's
+/// explicit intent; the other two are the fallback when they never renamed.
 pub fn extract_session_title(contents: &str) -> Option<String> {
+    let mut renamed: Option<String> = None;
     let mut ai_title: Option<String> = None;
     let mut first_user: Option<String> = None;
     for line in contents.lines() {
@@ -39,18 +42,46 @@ pub fn extract_session_title(contents: &str) -> Option<String> {
                     ai_title = Some(title.to_string());
                 }
             }
+            // `/rename` is echoed into the transcript as a local-command result
+            // ("<local-command-stdout>Session renamed to: NAME</local-command-stdout>").
+            // Latest one wins, so keep overwriting.
+            Some("system") => {
+                if let Some(name) = value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .and_then(parse_renamed_name)
+                {
+                    renamed = Some(name);
+                }
+            }
             Some("user") if first_user.is_none() => {
                 first_user = user_message_text(&value);
             }
             _ => {}
         }
     }
-    let raw = ai_title.or(first_user)?;
+    let raw = renamed.or(ai_title).or(first_user)?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
     Some(trimmed.chars().take(MAX_TITLE_CHARS).collect())
+}
+
+/// Extract the name from a Claude Code `/rename` local-command output string,
+/// e.g. "<local-command-stdout>Session renamed to: my-name</local-command-stdout>"
+/// -> "my-name". None when the marker is absent or the name is empty.
+fn parse_renamed_name(content: &str) -> Option<String> {
+    const MARKER: &str = "Session renamed to: ";
+    let start = content.rfind(MARKER)? + MARKER.len();
+    let rest = &content[start..];
+    let end = rest.find("</local-command-stdout>").unwrap_or(rest.len());
+    let name = rest[..end].trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 /// The text of a user message whose content is a plain string or a list holding
@@ -407,6 +438,48 @@ mod tests {
             "\n",
         );
         assert_eq!(extract_session_title(contents).as_deref(), Some("Refined title"));
+    }
+
+    #[test]
+    fn title_prefers_the_rename_over_ai_title_and_first_message() {
+        let contents = concat!(
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"do a thing"}]}}"#,
+            "\n",
+            r#"{"type":"ai-title","aiTitle":"Auto title"}"#,
+            "\n",
+            r#"{"type":"system","subtype":"local_command","content":"<local-command-stdout>Session renamed to: old-name</local-command-stdout>"}"#,
+            "\n",
+            r#"{"type":"system","subtype":"local_command","content":"<local-command-stdout>Session renamed to: my-feature</local-command-stdout>"}"#,
+            "\n",
+        );
+        // Latest /rename wins over the auto ai-title and the first message.
+        assert_eq!(extract_session_title(contents).as_deref(), Some("my-feature"));
+    }
+
+    #[test]
+    fn title_falls_back_when_no_rename_present() {
+        // A system line that is not a rename must not break the ai-title fallback.
+        let contents = concat!(
+            r#"{"type":"system","subtype":"local_command","content":"<local-command-stdout>something else</local-command-stdout>"}"#,
+            "\n",
+            r#"{"type":"ai-title","aiTitle":"Auto title"}"#,
+            "\n",
+        );
+        assert_eq!(extract_session_title(contents).as_deref(), Some("Auto title"));
+    }
+
+    #[test]
+    fn parse_renamed_name_extracts_and_guards_empty() {
+        assert_eq!(
+            parse_renamed_name("<local-command-stdout>Session renamed to: abc</local-command-stdout>").as_deref(),
+            Some("abc"),
+        );
+        assert_eq!(parse_renamed_name("Session renamed to: bare-name").as_deref(), Some("bare-name"));
+        assert_eq!(parse_renamed_name("no marker here"), None);
+        assert_eq!(
+            parse_renamed_name("<local-command-stdout>Session renamed to: </local-command-stdout>"),
+            None,
+        );
     }
 
     #[test]
