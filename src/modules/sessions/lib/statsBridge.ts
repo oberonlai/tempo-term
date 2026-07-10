@@ -81,9 +81,14 @@ export interface SessionsStats {
 
 /** Fetches aggregated dashboard stats. `days` narrows cards/heatmap/top
  *  sessions to a rolling window; pass `null` for all-time. The weekly digest
- *  always covers the last 7 local days regardless of this value. */
-export function sessionsStats(days: number | null): Promise<SessionsStats> {
-  return invoke<SessionsStats>("sessions_stats", { days });
+ *  always covers the last 7 local days regardless of this value. Pass
+ *  `projectCwd` to scope every aggregate to a single project (the project
+ *  dashboard); omit it for the all-projects user dashboard. */
+export function sessionsStats(
+  days: number | null,
+  projectCwd?: string | null,
+): Promise<SessionsStats> {
+  return invoke<SessionsStats>("sessions_stats", { days, projectCwd: projectCwd ?? null });
 }
 
 /** Moves a session's source file (and its companions) to the OS trash, then

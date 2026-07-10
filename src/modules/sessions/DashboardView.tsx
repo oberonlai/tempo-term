@@ -16,6 +16,8 @@ import { AGENT_BADGE_CLASS } from "./lib/agentBadge";
 import { heatmapLevel, heatmapMax, heatmapMonthLabels, heatmapWeeks } from "./lib/heatmap";
 import { estimateOutputCost } from "./lib/cost";
 import { formatHour, modelSlices, OTHERS_SLICE, peakHour } from "./lib/insights";
+import { openTerminalAt } from "./lib/openTerminalAt";
+import { ArrowLeft } from "lucide-react";
 
 type RangeDays = 30 | 90 | 365 | null;
 
@@ -207,7 +209,13 @@ function TopSessionRow({ session, onSelect, onSelectProject }: TopSessionRowProp
  * list (toggle by message/token volume, row click selects the session), and
  * a per-agent weekly digest.
  */
-export function DashboardView() {
+/**
+ * @param projectCwd When set, every aggregate is scoped to that project (the
+ *   "project dashboard" reached from the sidebar / a project link). A header
+ *   with the project name, a back button, and an open-terminal shortcut
+ *   replaces the plain title. Omitted for the all-projects user dashboard.
+ */
+export function DashboardView({ projectCwd }: { projectCwd?: string } = {}) {
   const { t, i18n } = useTranslation();
   const select = useSessionsStore((s) => s.select);
   const selectProject = useSessionsStore((s) => s.selectProject);
@@ -229,7 +237,7 @@ export function DashboardView() {
     // `cancelled` scopes the fetch to the (range, tick) that triggered it:
     // a later change or unmount flips it before a stale response can land.
     let cancelled = false;
-    sessionsStats(range)
+    sessionsStats(range, projectCwd)
       .then((next) => {
         if (!cancelled) {
           setStats(next);
@@ -242,7 +250,7 @@ export function DashboardView() {
     return () => {
       cancelled = true;
     };
-  }, [range, refreshTick]);
+  }, [range, refreshTick, projectCwd]);
 
   useEffect(() => {
     // Subscribed once for the component's lifetime. Mirrors the
@@ -301,7 +309,13 @@ export function DashboardView() {
   // search/agent/model filters (not the full unfiltered index), mirroring
   // what the sessions panel itself shows.
   async function handleExportCsv() {
-    const { pinned, history } = visibleSessions(sessions, query, agentFilter, modelFilter);
+    const { pinned, history } = visibleSessions(
+      sessions,
+      query,
+      agentFilter,
+      modelFilter,
+      projectCwd ? { mode: "project", cwd: projectCwd } : { mode: "user" },
+    );
     const csv = toSessionsCsv([...pinned, ...history]);
     const path = await saveFile("ai-sessions.csv", [{ name: "CSV", extensions: ["csv"] }]);
     if (path === null) {
@@ -313,7 +327,32 @@ export function DashboardView() {
   return (
     <div className="h-full overflow-y-auto bg-bg-inset p-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-sm font-semibold text-fg">{t("sessions.dashboard.title")}</h1>
+        {projectCwd ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <Tooltip label={t("sessions.dashboard.back")}>
+              <button
+                type="button"
+                aria-label={t("sessions.dashboard.back")}
+                onClick={() => selectProject(null)}
+                className="shrink-0 rounded p-1 text-fg-subtle hover:bg-bg-elevated hover:text-fg"
+              >
+                <ArrowLeft size={14} />
+              </button>
+            </Tooltip>
+            <h1 className="min-w-0 truncate text-sm font-semibold text-fg">
+              {projectCwd.split(/[/\\]/).filter(Boolean).pop() ?? projectCwd}
+            </h1>
+            <button
+              type="button"
+              onClick={() => openTerminalAt(projectCwd)}
+              className="shrink-0 rounded px-2 py-0.5 text-[11px] text-fg-subtle transition-colors hover:bg-bg-elevated hover:text-fg"
+            >
+              {t("sessions.project.openTerminal")}
+            </button>
+          </div>
+        ) : (
+          <h1 className="text-sm font-semibold text-fg">{t("sessions.dashboard.title")}</h1>
+        )}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1">
             {RANGE_OPTIONS.map((opt) => (

@@ -64,6 +64,11 @@ impl Index {
                    file_size INTEGER NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS idx_sessions_file ON sessions(file_path);
+                 -- Project-scoped dashboard/stats filter on `project_cwd`
+                 -- (WHERE project_cwd = ? and the IN-subquery form). Without
+                 -- this every project-scoped stats call full-scans the sessions
+                 -- table 6-8 times; the seek keeps it cheap as history grows.
+                 CREATE INDEX IF NOT EXISTS idx_sessions_project_cwd ON sessions(project_cwd);
                  CREATE TABLE IF NOT EXISTS activity(
                    session_id TEXT NOT NULL,
                    date TEXT NOT NULL,

@@ -123,7 +123,7 @@ describe("DashboardView", () => {
   it("fetches stats on mount for the default range and renders card values", async () => {
     render(<DashboardView />);
 
-    expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 365 });
+    expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 365, projectCwd: null });
     // The single card row: sessions / messages / projects / active days / cost.
     await waitFor(() => expect(screen.getByText("12")).toBeInTheDocument());
     expect(screen.getByText("340")).toBeInTheDocument();
@@ -133,15 +133,38 @@ describe("DashboardView", () => {
     expect(screen.getByText("≈ US$ 0.19")).toBeInTheDocument();
   });
 
+  it("scopes stats to the project and shows a project header when projectCwd is set", async () => {
+    render(<DashboardView projectCwd="/repo/tempo" />);
+
+    expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", {
+      days: 365,
+      projectCwd: "/repo/tempo",
+    });
+    // The header shows the project basename plus an open-terminal shortcut,
+    // instead of the plain "統計" dashboard title.
+    await waitFor(() => expect(screen.getByText("tempo")).toBeInTheDocument());
+    expect(screen.getByText("sessions.project.openTerminal")).toBeInTheDocument();
+    expect(screen.queryByText("sessions.dashboard.title")).not.toBeInTheDocument();
+  });
+
+  it("clears the selected project via the back button", async () => {
+    useSessionsStore.setState({ selectedProject: "/repo/tempo" });
+    render(<DashboardView projectCwd="/repo/tempo" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.back" }));
+
+    expect(useSessionsStore.getState().selectedProject).toBeNull();
+  });
+
   it("refetches with the chosen range when a chip is clicked", async () => {
     render(<DashboardView />);
     await waitFor(() => expect(screen.getByText("12")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.range30" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30 }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30, projectCwd: null }));
 
     fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.rangeAll" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: null }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: null, projectCwd: null }));
   });
 
   it("shows top-by-messages rows by default and switches to top-by-tokens on tab click", async () => {
@@ -255,7 +278,7 @@ describe("DashboardView", () => {
     await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.range30" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30 }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30, projectCwd: null }));
 
     // Changing the range refetches but must not tear down and re-create the
     // event listener.
@@ -268,7 +291,7 @@ describe("DashboardView", () => {
     await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.range30" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30 }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30, projectCwd: null }));
     mockInvoke.mockClear();
 
     // Fire the event callback the component registered on mount — the
@@ -277,7 +300,7 @@ describe("DashboardView", () => {
     const callback = mockListen.mock.calls[0][1] as () => void;
     callback();
 
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30 }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 30, projectCwd: null }));
   });
 
   it("subscribes to sessions-index:updated and releases the listener on unmount", async () => {

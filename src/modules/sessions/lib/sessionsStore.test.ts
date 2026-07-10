@@ -131,6 +131,44 @@ describe("visibleSessions", () => {
     expect(visibleSessions(sessions, "", "all", "claude-opus-4-8").history.map((s) => s.id)).toEqual(["a"]);
   });
 
+  it("scopes to a single project by exact cwd match", () => {
+    const here = session({ id: "here", project_cwd: "/Users/muki/tempo" });
+    const elsewhere = session({ id: "elsewhere", project_cwd: "/Users/muki/other" });
+    const sub = session({ id: "sub", project_cwd: "/Users/muki/tempo/src" });
+
+    const { history } = visibleSessions([here, elsewhere, sub], "", "all", "all", {
+      mode: "project",
+      cwd: "/Users/muki/tempo",
+    });
+
+    // Exact match only — a subdirectory cwd is a different project.
+    expect(history.map((s) => s.id)).toEqual(["here"]);
+  });
+
+  it("hides antigravity sessions (empty project_cwd) in project scope", () => {
+    const claude = session({ id: "c", agent: "claude", project_cwd: "/Users/muki/tempo" });
+    const antigravity = session({ id: "a", agent: "antigravity", project_cwd: "" });
+
+    const scoped = visibleSessions([claude, antigravity], "", "all", "all", {
+      mode: "project",
+      cwd: "/Users/muki/tempo",
+    });
+    expect(scoped.history.map((s) => s.id)).toEqual(["c"]);
+
+    // But they appear in the user (all) scope.
+    const all = visibleSessions([claude, antigravity], "", "all", "all", { mode: "user" });
+    expect(all.history.map((s) => s.id)).toEqual(["c", "a"]);
+  });
+
+  it("falls back to showing everything when the project scope cwd is empty", () => {
+    const a = session({ id: "a", project_cwd: "/Users/muki/tempo" });
+    const b = session({ id: "b", project_cwd: "" });
+
+    const { history } = visibleSessions([a, b], "", "all", "all", { mode: "project", cwd: null });
+
+    expect(history.map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
   it("ignores a model filter for a model absent from the dataset (self-heals stranding)", () => {
     const mk = (id: string, model: string | null) =>
       ({ id, agent: "claude", project_cwd: "/p", title: id, started_at: 0, ended_at: 0,
@@ -162,5 +200,27 @@ describe("useSessionsStore", () => {
     useSessionsStore.getState().select("s2");
     expect(useSessionsStore.getState().selectedId).toBe("s2");
     expect(useSessionsStore.getState().selectedProject).toBeNull();
+  });
+
+  it("setScopeCwd locks the project and snaps panelScope back to project", () => {
+    useSessionsStore.setState({ scopeCwd: null, panelScope: "user" });
+    useSessionsStore.getState().setScopeCwd("/tmp/proj-a");
+    expect(useSessionsStore.getState().scopeCwd).toBe("/tmp/proj-a");
+    expect(useSessionsStore.getState().panelScope).toBe("project");
+  });
+
+  it("setScopeCwd ignores empty and unchanged values (keeps last project on sessions tab)", () => {
+    useSessionsStore.setState({ scopeCwd: "/tmp/proj-a", panelScope: "user" });
+    // Switching to a cwd-less tab (sessions tab) reports null — must not clear
+    // the scope nor disturb an explicit "user" scope.
+    useSessionsStore.getState().setScopeCwd(null);
+    expect(useSessionsStore.getState().scopeCwd).toBe("/tmp/proj-a");
+    expect(useSessionsStore.getState().panelScope).toBe("user");
+  });
+
+  it("setPanelScope switches the sidebar scope", () => {
+    useSessionsStore.setState({ panelScope: "project" });
+    useSessionsStore.getState().setPanelScope("user");
+    expect(useSessionsStore.getState().panelScope).toBe("user");
   });
 });

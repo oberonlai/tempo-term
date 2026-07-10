@@ -331,7 +331,11 @@ mod tests {
 /// background sync. Degrades to zeroed stats — never an error — before
 /// `sessions_index_start` has run.
 #[tauri::command]
-pub async fn sessions_stats(state: State<'_, SessionsIndexState>, days: Option<i64>) -> Result<SessionsStats, String> {
+pub async fn sessions_stats(
+    state: State<'_, SessionsIndexState>,
+    days: Option<i64>,
+    project_cwd: Option<String>,
+) -> Result<SessionsStats, String> {
     let index = {
         let guard = state.inner.lock().unwrap();
         guard.as_ref().map(|inner| Arc::clone(&inner.index))
@@ -339,9 +343,11 @@ pub async fn sessions_stats(state: State<'_, SessionsIndexState>, days: Option<i
     let Some(index) = index else {
         return Ok(stats::empty_stats());
     };
-    tauri::async_runtime::spawn_blocking(move || index.lock().unwrap().stats(days))
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        index.lock().unwrap().stats(days, project_cwd.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Per-project aggregates + recent sessions for the project view. Offloaded to

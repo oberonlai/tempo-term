@@ -169,7 +169,7 @@ describe("SessionsTabContent", () => {
 
     render(<SessionsTabContent />);
 
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 365 }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sessions_stats", { days: 365, projectCwd: null }));
     expect(screen.getByText("sessions.dashboard.title")).toBeInTheDocument();
   });
 

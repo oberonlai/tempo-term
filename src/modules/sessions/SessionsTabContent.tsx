@@ -15,7 +15,6 @@ import { AGENT_BADGE_CLASS } from "./lib/agentBadge";
 import { resumeCommand, resumeSession } from "./lib/resume";
 import { slugifyTitle } from "./lib/slug";
 import { DashboardView } from "./DashboardView";
-import { ProjectView } from "./ProjectView";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -190,8 +189,9 @@ export function SessionsTabContent() {
     // commit window must widen with it to pick up commits made mid-session.
   }, [session?.id, session?.project_cwd, session?.started_at, session?.ended_at]);
 
+  // The project dashboard is the same rich DashboardView, scoped to one cwd.
   if (selectedProject) {
-    return <ProjectView />;
+    return <DashboardView projectCwd={selectedProject} />;
   }
   if (!selectedId) {
     return <DashboardView />;

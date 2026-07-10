@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { History, LayoutDashboard, Pin, PinOff, Play, Search, Trash2 } from "lucide-react";
+import { FolderGit2, History, LayoutDashboard, Pin, PinOff, Play, Search, Trash2 } from "lucide-react";
 import { Tooltip } from "@/components/Tooltip";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Combobox } from "@/components/Combobox";
 import { useTabsStore } from "@/stores/tabsStore";
 import { useSessionStatusStore } from "@/modules/claude-progress/lib/sessionStatusStore";
 import { onSessionsUpdated, type SessionAgent, type SessionSummary } from "./lib/sessionsBridge";
-import { useSessionsStore, visibleSessions } from "./lib/sessionsStore";
+import { useSessionsStore, visibleSessions, type SessionsScope } from "./lib/sessionsStore";
 import { sessionsDelete } from "./lib/statsBridge";
 import { formatRelativeTime } from "./lib/relativeTime";
 import { deriveLiveSessions, type LiveSession } from "./lib/liveSessions";
@@ -347,6 +347,11 @@ export function SessionsPanel() {
   const setAgentFilter = useSessionsStore((s) => s.setAgentFilter);
   const setModelFilter = useSessionsStore((s) => s.setModelFilter);
   const select = useSessionsStore((s) => s.select);
+  const selectProject = useSessionsStore((s) => s.selectProject);
+  const scopeCwd = useSessionsStore((s) => s.scopeCwd);
+  const panelScope = useSessionsStore((s) => s.panelScope);
+  const setScopeCwd = useSessionsStore((s) => s.setScopeCwd);
+  const setPanelScope = useSessionsStore((s) => s.setPanelScope);
   const openSessionsTab = useTabsStore((s) => s.openSessionsTab);
   // The virtualized history list reads its viewport from this scroll
   // container. It lives in state (not a ref) so setting it on mount triggers a
@@ -385,6 +390,15 @@ export function SessionsPanel() {
       select(null);
     }
   }
+
+  // The cwd of the currently active tab, or undefined when the active tab has
+  // none (the sessions tab itself, a note, …). Sessions tabs carry no cwd, so
+  // switching to one leaves this undefined — `setScopeCwd` ignores that and
+  // keeps the panel scoped to the project the user came from.
+  const activeTabCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeId)?.cwd);
+  useEffect(() => {
+    setScopeCwd(activeTabCwd ?? null);
+  }, [activeTabCwd, setScopeCwd]);
 
   useEffect(() => {
     void useSessionsStore.getState().start();
@@ -438,8 +452,17 @@ export function SessionsPanel() {
   const modelComboboxOptions = modelOptions.map((m) => (m === "all" ? modelFilterAllLabel : m));
   const modelComboboxValue = modelFilter === "all" ? modelFilterAllLabel : modelFilter;
 
-  const { pinned, history } = visibleSessions(sessions, query, agentFilter, modelFilter);
+  const scope: SessionsScope =
+    panelScope === "user" ? { mode: "user" } : { mode: "project", cwd: scopeCwd };
+  const { pinned, history } = visibleSessions(sessions, query, agentFilter, modelFilter, scope);
   const isEmpty = pinned.length === 0 && history.length === 0;
+
+  // The project button routes to the scoped project's dashboard; it needs a
+  // project to route to. Disabled (with an explaining tooltip) until a project
+  // tab has been active.
+  const hasProject = Boolean(scopeCwd);
+  const projectLabel = t("sessions.dashboard.openProject");
+  const userLabel = t("sessions.dashboard.openUser");
 
   return (
     <div className="flex h-full flex-col bg-bg-inset">
@@ -447,23 +470,46 @@ export function SessionsPanel() {
         <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
           {t("nav.sessions")}
         </span>
-        {/* Opens the sessions tab with nothing selected, i.e. the dashboard.
-            Selecting a row also opens that tab but on the transcript viewer;
-            this is the only way to reach the dashboard as the home screen.
-            Shown as a labelled icon (not a hover-only tooltip) so it's a
-            discoverable button. */}
-        <button
-          type="button"
-          aria-label={t("sessions.dashboard.open")}
-          onClick={() => {
-            select(null);
-            openSessionsTab();
-          }}
-          className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-fg-subtle hover:bg-bg-elevated hover:text-fg"
-        >
-          <LayoutDashboard size={13} />
-          {t("sessions.dashboard.open")}
-        </button>
+        {/* Two dashboards, both rendered by DashboardView. "Project" scopes the
+            sidebar and opens the dashboard filtered to the scoped project's cwd;
+            "User" widens the sidebar back to every project and opens the
+            all-projects dashboard. The project one is a labelled icon
+            (discoverable) when reachable, and a disabled tooltip when no project
+            tab has been active yet. */}
+        <div className="flex items-center gap-1">
+          <Tooltip label={hasProject ? projectLabel : t("sessions.dashboard.openProjectUnavailable")}>
+            <button
+              type="button"
+              aria-label={projectLabel}
+              disabled={!hasProject}
+              onClick={() => {
+                if (!scopeCwd) {
+                  return;
+                }
+                setPanelScope("project");
+                selectProject(scopeCwd);
+                openSessionsTab();
+              }}
+              className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-fg-subtle hover:bg-bg-elevated hover:text-fg disabled:pointer-events-none disabled:opacity-40"
+            >
+              <FolderGit2 size={13} />
+              {projectLabel}
+            </button>
+          </Tooltip>
+          <button
+            type="button"
+            aria-label={userLabel}
+            onClick={() => {
+              setPanelScope("user");
+              select(null);
+              openSessionsTab();
+            }}
+            className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-fg-subtle hover:bg-bg-elevated hover:text-fg"
+          >
+            <LayoutDashboard size={13} />
+            {userLabel}
+          </button>
+        </div>
       </div>
 
       <div className="shrink-0 border-b border-border px-3 py-2">

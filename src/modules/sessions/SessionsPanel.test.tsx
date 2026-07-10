@@ -7,6 +7,22 @@ import { useTabsStore, type Tab } from "@/stores/tabsStore";
 import { useSessionStatusStore } from "@/modules/claude-progress/lib/sessionStatusStore";
 import { leaf } from "@/modules/terminal/lib/terminalLayout";
 
+// jsdom has no layout, so the virtualized history list's scroll container
+// measures as 0×0 and the virtualizer renders no rows. Give every element a
+// tall, fixed viewport so the virtualizer has a window big enough to render the
+// handful of sessions each test seeds. (Real virtualization is covered by the
+// browser; here we only assert list content and interactions.)
+// The virtualized history list measures its viewport from the scroll
+// container's offsetHeight, which jsdom always reports as 0 — so with no
+// override the virtualizer renders no rows. Give every element a tall, fixed
+// size so the handful of sessions each test seeds land in the window. (Real
+// virtualization is a browser concern; here we only assert list content and
+// interactions.)
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(900);
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320);
+});
+
 // vi.mock is hoisted to the top of the file, so mocks must be created with
 // vi.hoisted() to be accessible inside the factory callbacks.
 const { mockInvoke, mockListen, mockUnlisten, sessionsFixture, deleteFailure } = vi.hoisted(() => ({
@@ -100,6 +116,9 @@ describe("SessionsPanel", () => {
       agentFilter: "all",
       modelFilter: "all",
       selectedId: null,
+      selectedProject: null,
+      scopeCwd: null,
+      panelScope: "project",
     });
     useTabsStore.setState({ spaces: [], activeSpaceId: null, tabs: [], activeId: null });
     useSessionStatusStore.setState({ statuses: {}, agents: {} });
@@ -243,12 +262,13 @@ describe("SessionsPanel", () => {
     seedSessions([session({ id: "a", title: "Deploy script" })]);
     await renderSettled();
 
-    fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.open" }));
+    fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.openUser" }));
 
     // A sessions tab opens with nothing selected, so it shows the dashboard.
     expect(useTabsStore.getState().tabs).toHaveLength(1);
     expect(useTabsStore.getState().tabs[0].kind).toBe("sessions");
     expect(useSessionsStore.getState().selectedId).toBe(null);
+    expect(useSessionsStore.getState().panelScope).toBe("user");
   });
 
   it("toggles pin via the row's pin button without selecting the row", async () => {
@@ -471,6 +491,67 @@ describe("SessionsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "sessions.delete" }));
 
     expect(screen.queryByText("sessions.deleteError")).not.toBeInTheDocument();
+  });
+
+  it("scopes the list to the active project tab, hiding other projects", async () => {
+    const tab: Tab = {
+      id: "tab-1",
+      spaceId: "space-1",
+      title: "tempo",
+      kind: "terminal",
+      cwd: "/repo/tempo",
+      paneTree: leaf("leaf-1", { kind: "terminal", cwd: "/repo/tempo" }),
+      activeLeafId: "leaf-1",
+      paneOrder: ["leaf-1"],
+    };
+    useTabsStore.setState({
+      spaces: [{ id: "space-1", name: "Space" }],
+      activeSpaceId: "space-1",
+      tabs: [tab],
+      activeId: "tab-1",
+    });
+    seedSessions([
+      session({ id: "here", title: "In tempo", project_cwd: "/repo/tempo" }),
+      session({ id: "away", title: "In other", project_cwd: "/repo/other" }),
+    ]);
+    await renderSettled();
+
+    expect(screen.getByText("In tempo")).toBeInTheDocument();
+    expect(screen.queryByText("In other")).not.toBeInTheDocument();
+  });
+
+  it("opens the scoped project dashboard via the header button", async () => {
+    const tab: Tab = {
+      id: "tab-1",
+      spaceId: "space-1",
+      title: "tempo",
+      kind: "terminal",
+      cwd: "/repo/tempo",
+      paneTree: leaf("leaf-1", { kind: "terminal", cwd: "/repo/tempo" }),
+      activeLeafId: "leaf-1",
+      paneOrder: ["leaf-1"],
+    };
+    useTabsStore.setState({
+      spaces: [{ id: "space-1", name: "Space" }],
+      activeSpaceId: "space-1",
+      tabs: [tab],
+      activeId: "tab-1",
+    });
+    seedSessions([session({ id: "a", title: "x", project_cwd: "/repo/tempo" })]);
+    await renderSettled();
+
+    fireEvent.click(screen.getByRole("button", { name: "sessions.dashboard.openProject" }));
+
+    expect(useSessionsStore.getState().selectedProject).toBe("/repo/tempo");
+    expect(useSessionsStore.getState().panelScope).toBe("project");
+    expect(useTabsStore.getState().tabs.some((tb) => tb.kind === "sessions")).toBe(true);
+  });
+
+  it("disables the project dashboard button when no project tab has been active", async () => {
+    seedSessions([session({ id: "a", title: "x", project_cwd: "/repo/tempo" })]);
+    await renderSettled();
+
+    expect(screen.getByRole("button", { name: "sessions.dashboard.openProject" })).toBeDisabled();
   });
 
   it("releases the listener when unmounted before the subscription resolves", async () => {

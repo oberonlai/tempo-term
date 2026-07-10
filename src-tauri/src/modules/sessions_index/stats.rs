@@ -5,7 +5,7 @@
 //! history.
 
 use chrono::{Duration, Local};
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, Row, ToSql};
 
 use super::index::Index;
 use super::types::SessionSummary;
@@ -140,19 +140,28 @@ fn row_to_top_session(r: &Row) -> rusqlite::Result<TopSession> {
     })
 }
 
-/// Runs a top-sessions query that has no filter parameter (the all-time
-/// case, which reads straight from `sessions` regardless of activity rows).
-fn query_top_sessions_all(conn: &Connection, sql: &str) -> Vec<TopSession> {
+/// Runs a top-sessions query with a dynamically-built bind list (anonymous `?`
+/// placeholders, bound in order). The bind list varies with the range/project
+/// filters, so a single runner replaces the fixed-arity helpers.
+fn query_top_sessions(conn: &Connection, sql: &str, binds: &[&dyn ToSql]) -> Vec<TopSession> {
     let Ok(mut stmt) = conn.prepare(sql) else { return Vec::new() };
-    let Ok(rows) = stmt.query_map([], row_to_top_session) else { return Vec::new() };
+    let Ok(rows) = stmt.query_map(params_from_iter(binds.iter().copied()), row_to_top_session)
+    else {
+        return Vec::new();
+    };
     rows.flatten().collect()
 }
 
-/// Runs a top-sessions query filtered to ids active since `cutoff`.
-fn query_top_sessions_ranged(conn: &Connection, sql: &str, cutoff: &str) -> Vec<TopSession> {
-    let Ok(mut stmt) = conn.prepare(sql) else { return Vec::new() };
-    let Ok(rows) = stmt.query_map(params![cutoff], row_to_top_session) else { return Vec::new() };
-    rows.flatten().collect()
+/// The `AND ...` fragment (using an anonymous `?` placeholder) that scopes an
+/// `activity` query to one project's sessions, or `""` when unscoped. The
+/// activity table has no `project_cwd`, so it filters through the `sessions`
+/// table by session id. Callers push the same `project` value onto their bind
+/// list only when this returns a non-empty string.
+fn activity_project_clause(project: Option<&str>) -> &'static str {
+    match project {
+        Some(_) => " AND session_id IN (SELECT id FROM sessions WHERE project_cwd = ?)",
+        None => "",
+    }
 }
 
 impl Index {
@@ -160,31 +169,37 @@ impl Index {
     /// local days (`None` = all time). Defensive: an empty index, or any
     /// query failure (e.g. tables not yet created), yields zeroed stats —
     /// the dashboard always has something to render.
-    pub fn stats(&self, days: Option<i64>) -> SessionsStats {
+    pub fn stats(&self, days: Option<i64>, project: Option<&str>) -> SessionsStats {
         let cutoff = range_cutoff(days);
         SessionsStats {
-            cards: self.stats_cards(&cutoff),
-            heatmap: self.stats_heatmap(&cutoff),
-            top_by_messages: self.stats_top_by_messages(days, &cutoff),
-            top_by_tokens: self.stats_top_by_tokens(days, &cutoff),
-            weekly: self.stats_weekly(),
-            range_models: self.stats_range_models(&cutoff),
-            hourly: self.stats_hourly_today(),
+            cards: self.stats_cards(&cutoff, project),
+            heatmap: self.stats_heatmap(&cutoff, project),
+            top_by_messages: self.stats_top_by_messages(days, &cutoff, project),
+            top_by_tokens: self.stats_top_by_tokens(days, &cutoff, project),
+            weekly: self.stats_weekly(project),
+            range_models: self.stats_range_models(&cutoff, project),
+            hourly: self.stats_hourly_today(project),
         }
     }
 
     /// Messages per hour-of-day (0..23) for TODAY (local), always length 24 —
     /// a "what have I done today" view, independent of the range filter.
-    fn stats_hourly_today(&self) -> Vec<i64> {
+    fn stats_hourly_today(&self, project: Option<&str>) -> Vec<i64> {
         let mut hourly = vec![0i64; 24];
         let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
-        let Ok(mut stmt) = self.conn.prepare(
+        let sql = format!(
             "SELECT hour, COALESCE(SUM(messages),0) FROM activity
-             WHERE date = ?1 GROUP BY hour",
-        ) else {
+             WHERE date = ?{} GROUP BY hour",
+            activity_project_clause(project),
+        );
+        let mut binds: Vec<&dyn ToSql> = vec![&today];
+        if let Some(ref p) = project {
+            binds.push(p);
+        }
+        let Ok(mut stmt) = self.conn.prepare(&sql) else {
             return hourly;
         };
-        let Ok(rows) = stmt.query_map(params![today], |r| {
+        let Ok(rows) = stmt.query_map(params_from_iter(binds.iter().copied()), |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         }) else {
             return hourly;
@@ -197,30 +212,45 @@ impl Index {
         hourly
     }
 
-    fn stats_cards(&self, cutoff: &str) -> StatsCards {
+    fn stats_cards(&self, cutoff: &str, project: Option<&str>) -> StatsCards {
+        let totals_sql = format!(
+            "SELECT COUNT(DISTINCT session_id), COALESCE(SUM(messages),0),
+                    COALESCE(SUM(user_messages),0), COUNT(DISTINCT date),
+                    COALESCE(SUM(output_tokens),0)
+             FROM activity WHERE date >= ?{}",
+            activity_project_clause(project),
+        );
+        let mut totals_binds: Vec<&dyn ToSql> = vec![&cutoff];
+        if let Some(ref p) = project {
+            totals_binds.push(p);
+        }
         let totals: Option<(i64, i64, i64, i64, i64)> = self
             .conn
-            .query_row(
-                "SELECT COUNT(DISTINCT session_id), COALESCE(SUM(messages),0),
-                        COALESCE(SUM(user_messages),0), COUNT(DISTINCT date),
-                        COALESCE(SUM(output_tokens),0)
-                 FROM activity WHERE date >= ?1",
-                params![cutoff],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )
+            .query_row(&totals_sql, params_from_iter(totals_binds.iter().copied()), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
             .ok();
         let (sessions, messages, user_messages, active_days, output_tokens) =
             totals.unwrap_or((0, 0, 0, 0, 0));
 
+        // Scoped to a project, the distinct-project count is trivially 0 or 1;
+        // the same query yields that, so no special-casing is needed.
+        let projects_sql = format!(
+            "SELECT COUNT(DISTINCT s.project_cwd) FROM sessions s
+             WHERE s.project_cwd != ''
+               AND s.id IN (SELECT DISTINCT session_id FROM activity WHERE date >= ?){}",
+            match project {
+                Some(_) => " AND s.project_cwd = ?",
+                None => "",
+            },
+        );
+        let mut projects_binds: Vec<&dyn ToSql> = vec![&cutoff];
+        if let Some(ref p) = project {
+            projects_binds.push(p);
+        }
         let projects: i64 = self
             .conn
-            .query_row(
-                "SELECT COUNT(DISTINCT s.project_cwd) FROM sessions s
-                 WHERE s.project_cwd != ''
-                   AND s.id IN (SELECT DISTINCT session_id FROM activity WHERE date >= ?1)",
-                params![cutoff],
-                |r| r.get(0),
-            )
+            .query_row(&projects_sql, params_from_iter(projects_binds.iter().copied()), |r| r.get(0))
             .unwrap_or(0);
 
         let messages_per_session =
@@ -240,16 +270,27 @@ impl Index {
     /// Per-model output-token totals over the range, for a rough cost card.
     /// NULL-model sessions are omitted (their tokens can't be priced) but are
     /// still part of `cards.output_tokens`.
-    fn stats_range_models(&self, cutoff: &str) -> Vec<ModelTokens> {
-        let Ok(mut stmt) = self.conn.prepare(
+    fn stats_range_models(&self, cutoff: &str, project: Option<&str>) -> Vec<ModelTokens> {
+        // This query already JOINs `sessions s`, so scoping is a direct
+        // `s.project_cwd = ?` rather than the id-subquery form.
+        let sql = format!(
             "SELECT s.model, COALESCE(SUM(a.output_tokens),0)
              FROM activity a JOIN sessions s ON s.id = a.session_id
-             WHERE a.date >= ?1 AND s.model IS NOT NULL
+             WHERE a.date >= ?{} AND s.model IS NOT NULL
              GROUP BY s.model ORDER BY s.model",
-        ) else {
+            match project {
+                Some(_) => " AND s.project_cwd = ?",
+                None => "",
+            },
+        );
+        let mut binds: Vec<&dyn ToSql> = vec![&cutoff];
+        if let Some(ref p) = project {
+            binds.push(p);
+        }
+        let Ok(mut stmt) = self.conn.prepare(&sql) else {
             return Vec::new();
         };
-        let Ok(rows) = stmt.query_map(params![cutoff], |r| {
+        let Ok(rows) = stmt.query_map(params_from_iter(binds.iter().copied()), |r| {
             Ok(ModelTokens { model: r.get(0)?, output_tokens: r.get(1)? })
         }) else {
             return Vec::new();
@@ -257,15 +298,21 @@ impl Index {
         rows.flatten().collect()
     }
 
-    fn stats_heatmap(&self, cutoff: &str) -> Vec<HeatmapDay> {
-        let Ok(mut stmt) = self.conn.prepare(
+    fn stats_heatmap(&self, cutoff: &str, project: Option<&str>) -> Vec<HeatmapDay> {
+        let sql = format!(
             "SELECT date, COALESCE(SUM(messages),0), COUNT(DISTINCT session_id),
                     COALESCE(SUM(output_tokens),0)
-             FROM activity WHERE date >= ?1 GROUP BY date ORDER BY date ASC",
-        ) else {
+             FROM activity WHERE date >= ?{} GROUP BY date ORDER BY date ASC",
+            activity_project_clause(project),
+        );
+        let mut binds: Vec<&dyn ToSql> = vec![&cutoff];
+        if let Some(ref p) = project {
+            binds.push(p);
+        }
+        let Ok(mut stmt) = self.conn.prepare(&sql) else {
             return Vec::new();
         };
-        let Ok(rows) = stmt.query_map(params![cutoff], |r| {
+        let Ok(rows) = stmt.query_map(params_from_iter(binds.iter().copied()), |r| {
             Ok(HeatmapDay {
                 date: r.get(0)?,
                 messages: r.get(1)?,
@@ -280,57 +327,74 @@ impl Index {
 
     /// All-time reads straight from `sessions`; a range filters to ids with
     /// activity in that window (a JOIN on the filtered activity ids).
-    fn stats_top_by_messages(&self, days: Option<i64>, cutoff: &str) -> Vec<TopSession> {
-        match days {
-            None => query_top_sessions_all(
-                &self.conn,
-                "SELECT id, agent, title, project_cwd, message_count FROM sessions
-                 ORDER BY message_count DESC LIMIT 10",
-            ),
-            Some(_) => query_top_sessions_ranged(
-                &self.conn,
-                "SELECT id, agent, title, project_cwd, message_count FROM sessions
-                 WHERE id IN (SELECT DISTINCT session_id FROM activity WHERE date >= ?1)
-                 ORDER BY message_count DESC LIMIT 10",
-                cutoff,
-            ),
+    fn stats_top_by_messages(&self, days: Option<i64>, cutoff: &str, project: Option<&str>) -> Vec<TopSession> {
+        // `where_parts` are ANDed together; binds are pushed in the same order
+        // the `?` placeholders appear so `params_from_iter` lines them up.
+        let mut where_parts: Vec<&str> = Vec::new();
+        let mut binds: Vec<&dyn ToSql> = Vec::new();
+        if days.is_some() {
+            where_parts.push("id IN (SELECT DISTINCT session_id FROM activity WHERE date >= ?)");
+            binds.push(&cutoff);
         }
+        if let Some(ref p) = project {
+            where_parts.push("project_cwd = ?");
+            binds.push(p);
+        }
+        let where_clause =
+            if where_parts.is_empty() { String::new() } else { format!("WHERE {}", where_parts.join(" AND ")) };
+        let sql = format!(
+            "SELECT id, agent, title, project_cwd, message_count FROM sessions
+             {where_clause} ORDER BY message_count DESC LIMIT 10",
+        );
+        query_top_sessions(&self.conn, &sql, &binds)
     }
 
-    fn stats_top_by_tokens(&self, days: Option<i64>, cutoff: &str) -> Vec<TopSession> {
-        match days {
-            None => query_top_sessions_all(
-                &self.conn,
-                "SELECT id, agent, title, project_cwd, output_tokens FROM sessions
-                 WHERE output_tokens IS NOT NULL
-                 ORDER BY output_tokens DESC LIMIT 10",
-            ),
-            Some(_) => query_top_sessions_ranged(
-                &self.conn,
-                "SELECT id, agent, title, project_cwd, output_tokens FROM sessions
-                 WHERE output_tokens IS NOT NULL
-                   AND id IN (SELECT DISTINCT session_id FROM activity WHERE date >= ?1)
-                 ORDER BY output_tokens DESC LIMIT 10",
-                cutoff,
-            ),
+    fn stats_top_by_tokens(&self, days: Option<i64>, cutoff: &str, project: Option<&str>) -> Vec<TopSession> {
+        // `output_tokens IS NOT NULL` is always present; the range and project
+        // filters append after it, with binds pushed in placeholder order.
+        let mut where_parts: Vec<&str> = vec!["output_tokens IS NOT NULL"];
+        let mut binds: Vec<&dyn ToSql> = Vec::new();
+        if days.is_some() {
+            where_parts.push("id IN (SELECT DISTINCT session_id FROM activity WHERE date >= ?)");
+            binds.push(&cutoff);
         }
+        if let Some(ref p) = project {
+            where_parts.push("project_cwd = ?");
+            binds.push(p);
+        }
+        let sql = format!(
+            "SELECT id, agent, title, project_cwd, output_tokens FROM sessions
+             WHERE {} ORDER BY output_tokens DESC LIMIT 10",
+            where_parts.join(" AND "),
+        );
+        query_top_sessions(&self.conn, &sql, &binds)
     }
 
     /// Fixed last-7-local-days window, independent of the `days` filter
     /// used for the rest of the dashboard.
-    fn stats_weekly(&self) -> Vec<WeeklyAgentRow> {
+    fn stats_weekly(&self, project: Option<&str>) -> Vec<WeeklyAgentRow> {
         let cutoff = (Local::now().date_naive() - Duration::days(6)).format("%Y-%m-%d").to_string();
+        // Both queries JOIN `sessions s`, so scoping is a direct `s.project_cwd = ?`.
+        let scope = match project {
+            Some(_) => " AND s.project_cwd = ?",
+            None => "",
+        };
 
-        let Ok(mut stmt) = self.conn.prepare(
+        let agent_sql = format!(
             "SELECT s.agent, COUNT(DISTINCT a.session_id), COALESCE(SUM(a.messages),0),
                     COALESCE(SUM(a.output_tokens),0)
              FROM activity a JOIN sessions s ON s.id = a.session_id
-             WHERE a.date >= ?1
+             WHERE a.date >= ?{scope}
              GROUP BY s.agent ORDER BY s.agent",
-        ) else {
+        );
+        let mut agent_binds: Vec<&dyn ToSql> = vec![&cutoff];
+        if let Some(ref p) = project {
+            agent_binds.push(p);
+        }
+        let Ok(mut stmt) = self.conn.prepare(&agent_sql) else {
             return Vec::new();
         };
-        let Ok(agent_rows) = stmt.query_map(params![cutoff], |r| {
+        let Ok(agent_rows) = stmt.query_map(params_from_iter(agent_binds.iter().copied()), |r| {
             Ok(WeeklyAgentRow {
                 agent: r.get(0)?,
                 sessions: r.get(1)?,
@@ -346,15 +410,20 @@ impl Index {
         // Per-model output tokens, grouped alongside agent; a NULL model is
         // skipped from the `models` breakdown but its tokens are already
         // counted in the agent-level total above.
-        let Ok(mut model_stmt) = self.conn.prepare(
+        let model_sql = format!(
             "SELECT s.agent, s.model, COALESCE(SUM(a.output_tokens),0)
              FROM activity a JOIN sessions s ON s.id = a.session_id
-             WHERE a.date >= ?1 AND s.model IS NOT NULL
+             WHERE a.date >= ? AND s.model IS NOT NULL{scope}
              GROUP BY s.agent, s.model ORDER BY s.agent, s.model",
-        ) else {
+        );
+        let mut model_binds: Vec<&dyn ToSql> = vec![&cutoff];
+        if let Some(ref p) = project {
+            model_binds.push(p);
+        }
+        let Ok(mut model_stmt) = self.conn.prepare(&model_sql) else {
             return rows;
         };
-        let Ok(model_rows) = model_stmt.query_map(params![cutoff], |r| {
+        let Ok(model_rows) = model_stmt.query_map(params_from_iter(model_binds.iter().copied()), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
         }) else {
             return rows;
@@ -506,7 +575,7 @@ mod tests {
     #[test]
     fn empty_index_yields_zeroed_stats() {
         let index = Index::open(&temp_db("empty")).unwrap();
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         assert_eq!(stats.cards.sessions, 0);
         assert_eq!(stats.cards.messages, 0);
         assert_eq!(stats.cards.user_messages, 0);
@@ -524,7 +593,7 @@ mod tests {
     #[test]
     fn all_time_cards_aggregate_every_session() {
         let index = seeded_index("cards-all-time");
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         assert_eq!(stats.cards.sessions, 3);
         assert_eq!(stats.cards.messages, 20); // 10 + 6 + 4
         assert_eq!(stats.cards.user_messages, 10); // 5 + 3 + 2
@@ -540,12 +609,49 @@ mod tests {
     }
 
     #[test]
+    fn project_scope_limits_every_aggregate_to_one_project() {
+        let index = seeded_index("stats-project-scope");
+        // Project A holds s1 (today, 10 msgs, 100 tokens) and s3 (40 days ago,
+        // 4 msgs). Project B holds s2 (codex). Scoping to A, all-time, must
+        // exclude s2 everywhere.
+        let stats = index.stats(None, Some("/tmp/proj-a"));
+
+        assert_eq!(stats.cards.sessions, 2); // s1 + s3, not s2
+        assert_eq!(stats.cards.messages, 14); // 10 + 4
+        assert_eq!(stats.cards.projects, 1); // only project A
+        assert_eq!(stats.cards.output_tokens, 100); // only s1 has tokens
+
+        // Top lists never leak project B's session.
+        assert!(stats.top_by_messages.iter().all(|t| t.project_cwd == "/tmp/proj-a"));
+        assert_eq!(stats.top_by_messages.len(), 2);
+        assert!(stats.top_by_tokens.iter().all(|t| t.project_cwd == "/tmp/proj-a"));
+
+        // Weekly (last 7 days) sees only s1 from project A (claude), not s2 (codex).
+        assert_eq!(stats.weekly.len(), 1);
+        assert_eq!(stats.weekly[0].agent, "claude");
+
+        // Heatmap dates belong only to project A's sessions (today + 40 days ago).
+        assert_eq!(stats.heatmap.len(), 2);
+    }
+
+    #[test]
+    fn project_scope_for_unknown_project_is_empty() {
+        let index = seeded_index("stats-project-unknown");
+        let stats = index.stats(None, Some("/tmp/nope"));
+        assert_eq!(stats.cards.sessions, 0);
+        assert_eq!(stats.cards.messages, 0);
+        assert!(stats.top_by_messages.is_empty());
+        assert!(stats.weekly.is_empty());
+        assert!(stats.heatmap.is_empty());
+    }
+
+    #[test]
     fn range_filter_excludes_out_of_window_tokens_from_the_cards() {
         let index = seeded_index("cards-ranged-tokens");
         // s1 (today, 100 tokens) is in the 30-day window; s3 (40 days ago) is
         // out. s1 is the only token-bearing session, so both windows total 100,
         // but this pins that the token sum honors the cutoff like the counts do.
-        let stats = index.stats(Some(30));
+        let stats = index.stats(Some(30), None);
         assert_eq!(stats.cards.output_tokens, 100);
         assert_eq!(stats.range_models.len(), 1);
     }
@@ -553,7 +659,7 @@ mod tests {
     #[test]
     fn thirty_day_filter_excludes_the_old_sessions_activity() {
         let index = seeded_index("cards-30d");
-        let stats = index.stats(Some(30));
+        let stats = index.stats(Some(30), None);
         assert_eq!(stats.cards.sessions, 2); // s1, s2 only
         assert_eq!(stats.cards.messages, 16); // 10 + 6
         assert_eq!(stats.cards.user_messages, 8); // 5 + 3
@@ -565,7 +671,7 @@ mod tests {
     #[test]
     fn heatmap_is_ascending_by_date() {
         let index = seeded_index("heatmap");
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         assert_eq!(stats.heatmap.len(), 3);
         let dates: Vec<&str> = stats.heatmap.iter().map(|d| d.date.as_str()).collect();
         let mut sorted = dates.clone();
@@ -576,7 +682,7 @@ mod tests {
     #[test]
     fn hourly_is_length_24_and_buckets_todays_messages_by_hour() {
         let index = seeded_index("hourly");
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         assert_eq!(stats.hourly.len(), 24);
         // Only today's session (s1: 10 messages on hour 9) counts — s2 (3 days
         // ago) and s3 (40 days ago) are excluded from the today-only view.
@@ -587,7 +693,7 @@ mod tests {
     #[test]
     fn heatmap_carries_messages_sessions_and_tokens_per_day() {
         let index = seeded_index("heatmap-metrics");
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         // s1 is today with 10 messages, 1 session, 100 output tokens.
         let today = day_string(0);
         let day = stats.heatmap.iter().find(|d| d.date == today).unwrap();
@@ -599,7 +705,7 @@ mod tests {
     #[test]
     fn top_by_messages_orders_descending() {
         let index = seeded_index("top-messages");
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         let ids: Vec<&str> = stats.top_by_messages.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, vec!["s1", "s2", "s3"]);
         assert_eq!(stats.top_by_messages[0].value, 10);
@@ -608,7 +714,7 @@ mod tests {
     #[test]
     fn top_by_tokens_excludes_sessions_without_tokens() {
         let index = seeded_index("top-tokens");
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         assert_eq!(stats.top_by_tokens.len(), 1);
         assert_eq!(stats.top_by_tokens[0].id, "s1");
         assert_eq!(stats.top_by_tokens[0].value, 100);
@@ -618,7 +724,7 @@ mod tests {
     fn weekly_window_only_counts_last_7_days_regardless_of_days_filter() {
         let index = seeded_index("weekly");
         // Use an all-time call — weekly must still restrict itself to 7 days.
-        let stats = index.stats(None);
+        let stats = index.stats(None, None);
         assert_eq!(stats.weekly.len(), 2); // claude, codex — s3 (40d old) excluded
 
         let claude = stats.weekly.iter().find(|r| r.agent == "claude").unwrap();
