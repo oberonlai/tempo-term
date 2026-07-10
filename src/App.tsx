@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TabBar } from "@/components/TabBar";
 import { TitleBar } from "@/components/TitleBar";
-import { Sidebar, SIDEBAR_VIEW_ORDER } from "@/components/Sidebar";
+import { Sidebar } from "@/components/Sidebar";
 import { Resizer } from "@/components/Resizer";
 import { StatusBar } from "@/components/StatusBar";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -309,7 +309,7 @@ function App() {
 
       // ⌥1…⌥7 jump straight to a sidebar panel by its position in the icon bar.
       if (digit !== null && e.altKey && !e.metaKey && !e.ctrlKey && !editable) {
-        const view = SIDEBAR_VIEW_ORDER[digit - 1];
+        const view = useUiStore.getState().sidebarOrder[digit - 1];
         if (view) {
           e.preventDefault();
           useUiStore.getState().selectSidebar(view);

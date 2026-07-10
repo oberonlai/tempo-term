@@ -1,5 +1,17 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, FolderTree, GitBranch, History, LayoutGrid, NotebookPen, Server, type LucideIcon } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { ExplorerView } from "@/modules/explorer/ExplorerView";
 import { SourceControlView } from "@/modules/source-control/SourceControlView";
 import { AIView } from "@/modules/ai/AIView";
@@ -12,60 +24,143 @@ import { useUiStore, type SidebarView } from "@/stores/uiStore";
 import { probeStart } from "@/lib/perfProbe";
 
 interface SidebarTab {
-  id: SidebarView;
   icon: LucideIcon;
   labelKey: string;
 }
 
-const SIDEBAR_TABS: SidebarTab[] = [
-  { id: "workspaces", icon: LayoutGrid, labelKey: "nav.workspaces" },
-  { id: "explorer", icon: FolderTree, labelKey: "nav.explorer" },
-  { id: "sourceControl", icon: GitBranch, labelKey: "nav.git" },
-  { id: "notes", icon: NotebookPen, labelKey: "nav.notes" },
-  { id: "ai", icon: Bot, labelKey: "nav.ai" },
-  { id: "connections", icon: Server, labelKey: "nav.connections" },
-  { id: "sessions", icon: History, labelKey: "nav.sessions" },
-];
+const SIDEBAR_TABS: Record<SidebarView, SidebarTab> = {
+  workspaces: { icon: LayoutGrid, labelKey: "nav.workspaces" },
+  explorer: { icon: FolderTree, labelKey: "nav.explorer" },
+  sourceControl: { icon: GitBranch, labelKey: "nav.git" },
+  notes: { icon: NotebookPen, labelKey: "nav.notes" },
+  ai: { icon: Bot, labelKey: "nav.ai" },
+  connections: { icon: Server, labelKey: "nav.connections" },
+  sessions: { icon: History, labelKey: "nav.sessions" },
+};
 
-/**
- * The sidebar panels in their displayed left-to-right order, so ⌥1…⌥7 can map a
- * number to the matching panel. Kept beside SIDEBAR_TABS so the order never
- * drifts from what the icon bar renders.
- */
-export const SIDEBAR_VIEW_ORDER: SidebarView[] = SIDEBAR_TABS.map((tab) => tab.id);
+// Module-level so the reference stays stable across renders — an inline options
+// object would make useSensor/useSensors rebuild the sensors array on every
+// render (one happens mid-drag when draggingId updates). The 4px activation
+// distance keeps a plain click (panel select) from starting a drag. Mirrors
+// TabBar's tab reordering.
+const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 4 } };
+
+/** Common classes for an icon-bar button, active or not. */
+function iconButtonClass(active: boolean, dragging: boolean): string {
+  return `flex h-7 w-8 select-none items-center justify-center border-b-2 transition-colors ${
+    active
+      ? "border-accent text-fg"
+      : "border-transparent text-fg-subtle hover:border-border-strong hover:text-fg"
+  } ${dragging ? "opacity-30" : ""}`;
+}
+
+/** One draggable icon-bar entry. The dnd-kit pointer sensor distinguishes a
+ *  click (select the panel) from a drag (reorder) via the activation distance,
+ *  so no manual drag-vs-click bookkeeping is needed. */
+function SidebarIcon({
+  id,
+  active,
+  onSelect,
+}: {
+  id: SidebarView;
+  active: boolean;
+  onSelect: (id: SidebarView) => void;
+}) {
+  const { t } = useTranslation();
+  const { icon: Icon, labelKey } = SIDEBAR_TABS[id];
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+        transition,
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <Tooltip label={t(labelKey)} side="bottom">
+        <button
+          type="button"
+          aria-label={t(labelKey)}
+          aria-pressed={active}
+          onClick={() => onSelect(id)}
+          className={iconButtonClass(active, isDragging)}
+        >
+          <Icon size={15} />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
 
 export function Sidebar() {
-  const { t } = useTranslation();
   const sidebarView = useUiStore((s) => s.sidebarView);
   const selectSidebar = useUiStore((s) => s.selectSidebar);
+  const sidebarOrder = useUiStore((s) => s.sidebarOrder);
+  const reorderSidebar = useUiStore((s) => s.reorderSidebar);
+  // Pointer-based reordering via dnd-kit. HTML5 drag-and-drop is unusable here
+  // because Tauri's native drag-drop capture (dragDropEnabled, needed for file
+  // drops into the terminal) swallows the webview's HTML5 drag events; dnd-kit's
+  // pointer sensor is unaffected and TabBar already reorders tabs the same way.
+  const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
+  const [draggingId, setDraggingId] = useState<SidebarView | null>(null);
+  const DraggingIcon = draggingId ? SIDEBAR_TABS[draggingId].icon : null;
+
+  function handleSelect(id: SidebarView) {
+    if (id === "workspaces") {
+      probeStart();
+    }
+    selectSidebar(id);
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setDraggingId(event.active.id as SidebarView);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setDraggingId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) {
+      return;
+    }
+    const from = sidebarOrder.indexOf(active.id as SidebarView);
+    const to = sidebarOrder.indexOf(over.id as SidebarView);
+    reorderSidebar(from, to);
+  }
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-r border-border bg-bg-inset">
-      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
-        {SIDEBAR_TABS.map(({ id, icon: Icon, labelKey }) => {
-          const active = sidebarView === id;
-          return (
-            <Tooltip key={id} label={t(labelKey)} side="bottom">
-              <button
-                type="button"
-                aria-label={t(labelKey)}
-                aria-pressed={active}
-                onClick={() => {
-                  if (id === "workspaces") probeStart();
-                  selectSidebar(id);
-                }}
-                className={`flex h-7 w-8 items-center justify-center border-b-2 transition-colors ${
-                  active
-                    ? "border-accent text-fg"
-                    : "border-transparent text-fg-subtle hover:border-border-strong hover:text-fg"
-                }`}
-              >
-                <Icon size={15} />
-              </button>
-            </Tooltip>
-          );
-        })}
-      </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDraggingId(null)}
+      >
+        <div className="relative flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
+          <SortableContext items={sidebarOrder} strategy={horizontalListSortingStrategy}>
+            {sidebarOrder.map((id) => (
+              <SidebarIcon key={id} id={id} active={sidebarView === id} onSelect={handleSelect} />
+            ))}
+          </SortableContext>
+        </div>
+
+        {/* Floating icon that follows the cursor while dragging. */}
+        <DragOverlay>
+          {DraggingIcon ? (
+            <span
+              aria-hidden
+              className="flex h-7 w-8 items-center justify-center rounded-md border border-border-strong bg-bg-elevated text-fg shadow-lg"
+            >
+              <DraggingIcon size={15} />
+            </span>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {/*
