@@ -204,7 +204,7 @@ export function SetupWizard() {
           {logLines.length > 0 ? (
             <div
               ref={logBoxRef}
-              className="mt-4 max-h-44 overflow-y-auto rounded-lg border border-border bg-black/40 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted"
+              className="mt-4 max-h-44 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950 p-2.5 font-mono text-[11px] leading-relaxed text-neutral-100"
             >
               {logLines.map((line, i) => (
                 <div key={i} className="whitespace-pre-wrap break-all">
