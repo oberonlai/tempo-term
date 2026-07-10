@@ -216,6 +216,13 @@ fn search_dirs(
 /// Windows `.exe`/`.cmd` forms and avoids the `CreateProcess` CWD-search hijack,
 /// where a planted same-named binary in a writable working dir would run instead.
 fn find_tool(stem: &str) -> Option<PathBuf> {
+    // On Unix a GUI app launched from Finder inherits only launchd's minimal
+    // PATH, which omits version-manager dirs (nvm/fnm/volta). Resolve the PATH
+    // the user's login+interactive shell would have so nvm-installed CLIs are
+    // found; fall back to the process PATH if the shell probe fails.
+    #[cfg(not(windows))]
+    let path_env = login_path().or_else(|| std::env::var("PATH").ok());
+    #[cfg(windows)]
     let path_env = std::env::var("PATH").ok();
     let home = std::env::var("HOME")
         .ok()
@@ -250,10 +257,44 @@ fn tool_command(exe: &std::path::Path) -> Command {
     command
 }
 
+/// The user's login shell, used on Unix to run detection/installs the way their
+/// terminal would. Falls back to zsh (the macOS default).
+#[cfg(not(windows))]
+fn login_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+}
+
+/// The PATH the user's login+interactive shell (`-ilc`) would have, computed
+/// once and cached for the process. This is what makes version-manager dirs
+/// (nvm/fnm/volta, sourced from `~/.zshrc`) visible to the wizard; without it a
+/// GUI launch only sees launchd's minimal PATH. Any shell-init noise prints on
+/// earlier lines, so take the last line that looks like a PATH.
+#[cfg(not(windows))]
+fn login_path() -> Option<String> {
+    static CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let out = Command::new(login_shell())
+                .args(["-ilc", "echo $PATH"])
+                .stdin(Stdio::null())
+                .output()
+                .ok()?;
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .rev()
+                .map(str::trim)
+                .find(|l| l.contains('/'))
+                .map(str::to_string)
+        })
+        .clone()
+}
+
 /// Resolve and run `<tool> --version`, returning the parsed version or None if
 /// the tool is absent, errors, or outruns PROBE_TIMEOUT (killed so a hung binary
 /// never lingers). Reads output only after the process exits — `--version` is a
-/// few bytes, well under the pipe buffer, so this cannot deadlock.
+/// few bytes, well under the pipe buffer, so this cannot deadlock. The path is
+/// resolved by `find_tool`, which on Unix scans the login-shell PATH so
+/// version-manager installs are honoured.
 fn probe_version(stem: &str) -> Option<String> {
     let exe = find_tool(stem)?;
     let mut child = tool_command(&exe)
@@ -359,13 +400,21 @@ fn run_install(cmd: &str, on_output: &Channel<String>) -> Result<i32, String> {
     // antigravity's downloaded .cmd). CREATE_NO_WINDOW keeps a release build from
     // flashing a console for the shell it spawns.
     let temp = std::env::temp_dir();
-    let mut builder = if cfg!(target_os = "windows") {
+    #[cfg(windows)]
+    let mut builder = {
         let mut c = tool_command(std::path::Path::new("cmd"));
         c.arg("/C").arg(format!("{cmd} 2>&1"));
         c
-    } else {
-        let mut c = tool_command(std::path::Path::new("sh"));
-        c.arg("-c").arg(format!("{cmd} 2>&1"));
+    };
+    // Run installs through the user's login+interactive shell so a version
+    // manager's npm (nvm/fnm/volta) — with a user-writable global prefix — is
+    // used. A bare `sh -c "npm install -g …"` gets launchd's minimal PATH, which
+    // resolves the system npm whose prefix (/usr/local) needs root → EACCES.
+    #[cfg(not(windows))]
+    let mut builder = {
+        let shell = login_shell();
+        let mut c = tool_command(std::path::Path::new(&shell));
+        c.arg("-ilc").arg(format!("{cmd} 2>&1"));
         c
     };
     let mut child = builder
